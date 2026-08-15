@@ -37,9 +37,10 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .symbol-field { display: flex; align-items: center; gap: 8px; color: #8f9dc0; font-size: 12px; }
 .symbol-field input { width: 77px; color: #fff; background: #101838; border: 1px solid #63789f; border-radius: 5px; padding: 8px 10px; font-weight: 700; }
 .spot-price { font-size: 18px; font-weight: 700; }
-.down { color: #e96573; font-size: 11px; font-weight: 500; margin-left: 8px; }
+.spot-detail { color: #8794b8; font-size: 11px; font-weight: 500; margin-left: 8px; }
 .data-badge { color: #e5c75c; background: #332e19; border: 1px solid #615628; border-radius: 999px; padding: 5px 9px; font-size: 11px; }
 .quote-actions { margin-left: auto; }
+.data-error { margin: 0 0 18px; padding: 11px 14px; color: #ffc0c7; background: #4d1e2a; border: 1px solid #8c3d4c; border-radius: 5px; font-size: 12px; }
 
 .expiry-section, .strike-section { border-top: 1px solid #202a4b; padding: 18px 0 15px; }
 .section-label strong { margin-left: 10px; color: #f1f5ff; letter-spacing: 0; }
@@ -82,6 +83,7 @@ svg text { fill: #8ea1c7; font-size: 13px; }
 .units button { min-width: 132px; }
 
 .payoff-table { padding: 18px 22px 26px; min-height: 380px; overflow: hidden; }
+.empty-state { min-height: 380px; display: grid; place-items: center; color: #8794b8; font-size: 13px; }
 .table-head, .table-row { display: grid; grid-template-columns: 1.2fr repeat(4, 1fr); gap: 8px; padding: 9px 12px; font-size: 12px; }
 .table-head { color: #9eb0d1; background: #1a2449; }
 .table-row { border-bottom: 1px solid #1a2444; color: #dce5fb; }
@@ -97,6 +99,7 @@ svg text { fill: #8ea1c7; font-size: 13px; }
 .leg-main span { color: #8b9abe; font-size: 12px; }
 .leg-price { display: flex; flex-direction: column; gap: 4px; margin-left: auto; }
 .leg-price strong { font-size: 15px; }
+.data-context { margin: 14px 0 0; color: #7180a2; font-size: 11px; line-height: 1.5; }
 .footer-note { position: fixed; bottom: 0; left: 0; width: 100%; padding: 10px; text-align: center; background: #05071b; color: #6f7d9e; border-top: 1px solid #1a2444; font-size: 11px; }
 
 @media (max-width: 1180px) {
