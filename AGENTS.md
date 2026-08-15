@@ -18,6 +18,7 @@ Option Emulator is a local, read-only options strategy visualiser. It uses tasty
 - Run the backend unit tests after changing domain or pricing code.
 - Run the frontend production build after changing the UI.
 - Do not claim live tastytrade verification unless an authenticated, read-only market-data smoke test has passed.
+- when testing the front end url use the browser and take screen shots to confirm the changes have worked before stating a successful build.
 
 ## Style
 

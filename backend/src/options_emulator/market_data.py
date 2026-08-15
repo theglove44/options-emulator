@@ -259,9 +259,7 @@ def _quote_snapshot_from_market_data(
     return QuoteSnapshot(
         symbol=symbol,
         streamer_symbol=streamer_symbol,
-        instrument_type=(
-            "equity_option" if metadata is not None else "equity"
-        ),
+        instrument_type=("equity_option" if metadata is not None else "equity"),
         underlying_symbol=metadata["underlying_symbol"] if metadata else symbol,
         expiration_date=metadata["expiration_date"] if metadata else None,
         strike=metadata["strike"] if metadata else None,
@@ -340,9 +338,7 @@ class FixtureMarketDataAdapter:
             contracts: list[OptionContract] = []
             for strike in FIXTURE_STRIKES:
                 for option_type in ("call", "put"):
-                    occ, streamer = _fixture_option_symbol(
-                        underlying, expiry, option_type, strike
-                    )
+                    occ, streamer = _fixture_option_symbol(underlying, expiry, option_type, strike)
                     contracts.append(
                         OptionContract(
                             symbol=occ,
@@ -373,9 +369,7 @@ class FixtureMarketDataAdapter:
             **context.model_dump(),
         )
 
-    async def get_quotes(
-        self, symbols: Sequence[str], pricing_mode: PricingMode
-    ) -> QuoteResponse:
+    async def get_quotes(self, symbols: Sequence[str], pricing_mode: PricingMode) -> QuoteResponse:
         now = utc_now()
         items: list[QuoteSnapshot] = []
         for requested_symbol in dict.fromkeys(symbols):
@@ -388,7 +382,11 @@ class FixtureMarketDataAdapter:
                     else max(metadata["strike"] - FIXTURE_SPOT, 0)
                 )
                 premium = intrinsic + (0.90 if metadata["option_type"] == "call" else 0.80)
-                bid, ask, last = round(max(premium - 0.05, 0), 2), round(premium + 0.05, 2), round(premium, 2)
+                bid, ask, last = (
+                    round(max(premium - 0.05, 0), 2),
+                    round(premium + 0.05, 2),
+                    round(premium, 2),
+                )
                 _, streamer = _fixture_option_symbol(
                     metadata["underlying_symbol"],
                     metadata["expiration_date"],
@@ -501,8 +499,7 @@ class TastytradeMarketDataAdapter:
         async with self._session() as session:
             results = await symbol_search(session, query)
         items = [
-            SymbolResult(symbol=result.symbol, description=result.description)
-            for result in results
+            SymbolResult(symbol=result.symbol, description=result.description) for result in results
         ]
         context = _context(self.source, delayed=self.delayed)
         return SymbolSearchResponse(query=query, items=items, **context.model_dump())
@@ -526,13 +523,13 @@ class TastytradeMarketDataAdapter:
                     expiration_date=option.expiration_date,
                     days_to_expiration=option.days_to_expiration,
                     strike=_as_float(option.strike_price) or 0.0,
-                    option_type=(
-                        "call" if option.option_type.value == "C" else "put"
-                    ),
+                    option_type=("call" if option.option_type.value == "C" else "put"),
                     shares_per_contract=option.shares_per_contract,
                     active=option.active,
                 )
-                for option in sorted(options, key=lambda item: (item.strike_price, item.option_type.value))
+                for option in sorted(
+                    options, key=lambda item: (item.strike_price, item.option_type.value)
+                )
             ]
             expirations.append(
                 ChainExpiration(
@@ -550,9 +547,7 @@ class TastytradeMarketDataAdapter:
             **context.model_dump(),
         )
 
-    async def get_quotes(
-        self, symbols: Sequence[str], pricing_mode: PricingMode
-    ) -> QuoteResponse:
+    async def get_quotes(self, symbols: Sequence[str], pricing_mode: PricingMode) -> QuoteResponse:
         self._require_credentials()
         from tastytrade import DXLinkStreamer
         from tastytrade.dxfeed import Greeks
@@ -570,7 +565,9 @@ class TastytradeMarketDataAdapter:
 
         async with self._session() as session:
             market_data = await get_market_data_by_type(session, **kwargs)
-            greek_events = await self._fetch_greeks(session, option_symbols, DXLinkStreamer, Greeks, Option)
+            greek_events = await self._fetch_greeks(
+                session, option_symbols, DXLinkStreamer, Greeks, Option
+            )
 
         items: list[QuoteSnapshot] = []
         for item in market_data:
@@ -641,9 +638,7 @@ class TastytradeMarketDataAdapter:
         greeks_class: Any,
         option_class: Any,
     ) -> dict[str, tuple[GreekSnapshot, datetime]]:
-        streamer_symbols = {
-            _option_streamer_symbol(symbol, option_class) for symbol in symbols
-        }
+        streamer_symbols = {_option_streamer_symbol(symbol, option_class) for symbol in symbols}
         if not streamer_symbols:
             return {}
         events: dict[str, tuple[GreekSnapshot, datetime]] = {}

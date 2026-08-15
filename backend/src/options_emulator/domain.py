@@ -98,9 +98,7 @@ class Position:
     def net_cash_flow(self) -> float:
         """Cash flow to enter: positive is a debit, negative is a credit."""
 
-        return sum(
-            leg.signed_quantity * leg.multiplier * leg.entry_price for leg in self.legs
-        )
+        return sum(leg.signed_quantity * leg.multiplier * leg.entry_price for leg in self.legs)
 
     @property
     def net_debit(self) -> float:

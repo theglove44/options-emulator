@@ -27,9 +27,7 @@ class MarketDataTests(unittest.TestCase):
         )
 
     def test_fixture_quote_honours_selected_pricing_mode(self) -> None:
-        quotes = asyncio.run(
-            self.adapter.get_quotes(["ETHA"], PricingMode.ASK)
-        )
+        quotes = asyncio.run(self.adapter.get_quotes(["ETHA"], PricingMode.ASK))
 
         self.assertEqual(quotes.items[0].selected_price, 14.23)
         self.assertEqual(quotes.pricing_mode, PricingMode.ASK)
