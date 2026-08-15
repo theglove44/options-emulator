@@ -70,7 +70,9 @@ npm run build
 
 Milestone 1 now has the read-only adapter contract, fixture implementation, and
 live tastytrade implementation for symbol search, expirations, option chains,
-quotes, and Greeks. An authenticated live smoke test and frontend wiring remain
-separate verification steps.
+quotes, and Greeks. The authenticated live smoke-test record is in
+[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); frontend wiring remains a separate
+verification step.
 
-See [docs/SPEC.md](docs/SPEC.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/BACKLOG.md](docs/BACKLOG.md).
+See [docs/SPEC.md](docs/SPEC.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[docs/BACKLOG.md](docs/BACKLOG.md), and [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md).
