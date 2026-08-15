@@ -13,7 +13,7 @@
 ## Next
 
 - [x] Add strategy template registry for the existing Long/Short Call and Put single-leg shell.
-- [ ] Add multi-leg editing and position summary.
+- [x] Add explicit multi-leg editing and aggregate position summary seam to the current builder.
 - [ ] Add vertical spreads, straddles, strangles, and iron condors.
 - [ ] Add graph/table display switch.
 - [ ] Add bid/ask versus midpoint pricing mode.

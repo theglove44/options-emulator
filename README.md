@@ -73,7 +73,11 @@ quote, option midpoint, pricing mode, source timestamp, and delayed/stale state
 come from the backend. The expiration payoff remains a clearly labelled local
 modelled scenario. The current single-leg builder forms are also represented by
 an explicit strategy template registry, with Long Call as the default; multi-leg
-templates remain later work.
+templates remain later work. The builder now also has an explicit multi-leg seam:
+legs can be added, selected, edited, and removed, with aggregate cash-flow and
+expiration-profile summaries kept separate from observed market data. Aggregate
+expiration output is withheld while a leg is unpriced or expiries are not aligned;
+multi-expiry pre-expiry modelling remains later work.
 
 ## Verification
 
@@ -90,8 +94,9 @@ npm run build
 Milestone 1 now has the read-only adapter contract, fixture implementation, live
 tastytrade implementation, reusable authenticated smoke command, and fixture
 frontend wiring plus the current single-leg strategy template registry for
-symbol search, expirations, option chains, quotes, and Greeks. The existing
-authenticated live smoke-test record is in
+symbol search, expirations, option chains, quotes, and Greeks. Fixture-mode
+multi-leg editing and position summary are also verified in the current builder.
+The existing authenticated live smoke-test record is in
 [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); this checkout did not have the private
 backend environment, so no new live-authenticated result is claimed here.
 

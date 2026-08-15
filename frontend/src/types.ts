@@ -9,6 +9,8 @@ export type Leg = {
   expiry: string;
   quantity: number;
   price: number;
+  priceLoaded: boolean;
+  multiplier: number;
 };
 
 export type ProfilePoint = {

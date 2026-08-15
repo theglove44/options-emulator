@@ -60,6 +60,10 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .metric .profit { color: #53dd85; }
 .metric .loss { color: #f06876; }
 .metric .neutral { color: #f2f5ff; }
+.position-summary { display: flex; align-items: center; gap: 30px; margin: 18px 0 0; padding: 13px 18px; border: 1px solid #26345c; background: #0d1434; }
+.position-summary > div { display: flex; flex-direction: column; gap: 5px; }
+.position-summary strong { font-size: 14px; }
+.modelled-note { margin-left: auto; color: #7180a2; font-size: 11px; }
 
 .chart-panel { border: 1px solid #263259; background: #0b1030; box-shadow: 0 17px 60px rgba(0,0,0,.23); }
 .chart-header { justify-content: space-between; padding: 17px 20px; border-bottom: 1px solid #20294b; }
@@ -91,7 +95,12 @@ svg text { fill: #8ea1c7; font-size: 13px; }
 .profit-text { color: #51d780; }
 .loss-text { color: #ee6878; }
 
-.leg-card { gap: 15px; margin-top: 18px; padding: 16px 19px; border: 1px solid #26345c; background: #0d1434; }
+.leg-list { margin-top: 18px; }
+.leg-card { gap: 15px; margin-top: 9px; padding: 0; border: 1px solid #26345c; background: #0d1434; }
+.leg-card:first-child { margin-top: 0; }
+.leg-card.active { border-color: #3d78a4; box-shadow: inset 3px 0 #39a9e6; }
+.leg-select { display: flex; align-items: center; flex: 1; gap: 15px; min-width: 0; padding: 16px 0 16px 19px; color: inherit; text-align: left; background: transparent; border: 0; }
+.leg-select[aria-pressed="false"] { opacity: .78; }
 .leg-side { font-size: 11px; font-weight: 800; padding: 7px 9px; border-radius: 4px; }
 .leg-side.buy { color: #9ff1bd; background: #123d31; }
 .leg-side.sell { color: #ffc0c7; background: #4d1e2a; }
@@ -99,6 +108,8 @@ svg text { fill: #8ea1c7; font-size: 13px; }
 .leg-main span { color: #8b9abe; font-size: 12px; }
 .leg-price { display: flex; flex-direction: column; gap: 4px; margin-left: auto; }
 .leg-price strong { font-size: 15px; }
+.leg-actions { display: flex; gap: 7px; padding-right: 14px; }
+.add-leg { margin-top: 9px; }
 .data-context { margin: 14px 0 0; color: #7180a2; font-size: 11px; line-height: 1.5; }
 .footer-note { position: fixed; bottom: 0; left: 0; width: 100%; padding: 10px; text-align: center; background: #05071b; color: #6f7d9e; border-top: 1px solid #1a2444; font-size: 11px; }
 
