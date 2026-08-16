@@ -51,6 +51,16 @@ describe("position editing seam", () => {
     expect(atSpot?.pnl).toBeCloseTo(-55);
   });
 
+  it("uses the requested range when sampling the payoff graph", () => {
+    const narrow = buildPositionProfile([longCall], 14, 0.08);
+    const wide = buildPositionProfile([longCall], 14, 0.3);
+
+    expect(narrow[0].price).toBeCloseTo(12.88);
+    expect(narrow.at(-1)?.price).toBeCloseTo(15.12);
+    expect(wide[0].price).toBeCloseTo(9.8);
+    expect(wide.at(-1)?.price).toBeCloseTo(18.2);
+  });
+
   it("preserves an adjusted contract multiplier in position arithmetic", () => {
     const adjustedLeg = { ...longCall, multiplier: 10 };
 

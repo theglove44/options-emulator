@@ -32,12 +32,12 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .button { background: #173358; color: #e8efff; border: 1px solid #2d5685; border-radius: 6px; padding: 9px 13px; font-size: 12px; }
 .button.primary { background: #2776b9; border-color: #55b6ec; }
 .button.subtle { background: transparent; border-color: #303e66; color: #a6b5d3; }
-.template-field { display: flex; align-items: center; gap: 7px; color: #8794b8; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-.template-field select { color: #e8efff; background: #101838; border: 1px solid #3f5681; border-radius: 5px; padding: 9px 28px 9px 10px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.template-field, .pricing-field { display: flex; align-items: center; gap: 7px; color: #8794b8; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.template-field select, .pricing-field select { color: #e8efff; background: #101838; border: 1px solid #3f5681; border-radius: 5px; padding: 9px 28px 9px 10px; font-size: 12px; text-transform: none; letter-spacing: 0; }
 
 .quote-row { gap: 16px; margin: 26px 0 21px; }
 .symbol-field { display: flex; align-items: center; gap: 8px; color: #8f9dc0; font-size: 12px; }
-.symbol-field input { width: 77px; color: #fff; background: #101838; border: 1px solid #63789f; border-radius: 5px; padding: 8px 10px; font-weight: 700; }
+.symbol-field input { width: 88px; color: #fff; background: #101838; border: 1px solid #63789f; border-radius: 5px; padding: 8px 10px; font-weight: 700; }
 .spot-price { font-size: 18px; font-weight: 700; }
 .spot-detail { color: #8794b8; font-size: 11px; font-weight: 500; margin-left: 8px; }
 .data-badge { color: #e5c75c; background: #332e19; border: 1px solid #615628; border-radius: 999px; padding: 5px 9px; font-size: 11px; }
@@ -46,13 +46,24 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 
 .expiry-section, .strike-section { border-top: 1px solid #202a4b; padding: 18px 0 15px; }
 .section-label strong { margin-left: 10px; color: #f1f5ff; letter-spacing: 0; }
-.expiry-track { display: flex; gap: 8px; margin-top: 13px; }
-.expiry-pill { min-width: 94px; border: 1px solid #303c61; border-radius: 5px; background: #151d3b; color: #9ba8c5; padding: 7px 12px; display: flex; justify-content: space-between; gap: 12px; }
-.expiry-pill small { color: #657596; }
+.expiry-legend { margin-left: 14px; color: #657596; font-size: 10px; letter-spacing: .08em; }
+.expiry-track { display: flex; gap: 8px; margin-top: 13px; overflow-x: auto; padding-bottom: 3px; }
+.expiry-pill { min-width: 106px; border: 1px solid #303c61; border-radius: 5px; background: #151d3b; color: #9ba8c5; padding: 8px 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.expiry-pill small { width: 100%; color: #657596; display: flex; justify-content: space-between; gap: 9px; font-size: 10px; }
+.expiry-kind { color: #a9b8d5; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
 .expiry-pill.selected { background: #2993d0; border-color: #62c7f0; color: #fff; }
 .expiry-pill.selected small { color: #d8f3ff; }
-.strike-slider { width: 100%; accent-color: #39a9e6; margin: 20px 0 7px; }
-.strike-scale { display: flex; justify-content: space-between; position: relative; color: #7482a6; font-size: 11px; }
+.strike-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.strike-heading > span { color: #7482a6; font-size: 11px; }
+.strike-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; margin-top: 14px; }
+.strike-option { min-height: 58px; display: flex; flex-direction: column; justify-content: center; gap: 4px; border: 1px solid #304168; border-radius: 6px; color: #b8c5df; background: #151d3b; padding: 8px 6px; }
+.strike-option:hover { border-color: #65c9f2; color: #fff; background: #1b2b50; }
+.strike-option.selected { border-color: #68cdf3; background: #2993d0; color: #fff; box-shadow: 0 0 0 1px rgba(104, 205, 243, .25); }
+.strike-option strong { font-size: 16px; }
+.strike-option small { color: #7183a8; font-size: 9px; letter-spacing: .08em; }
+.strike-option.selected small { color: #d9f4ff; }
+.strike-empty { grid-column: 1 / -1; color: #8794b8; font-size: 12px; padding: 10px 0; }
+.strike-context { display: flex; justify-content: space-between; margin-top: 10px; color: #7482a6; font-size: 11px; }
 .spot-marker { color: #e8efff; }
 
 .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin: 11px 0 18px; background: #222c50; border: 1px solid #222c50; }
@@ -72,13 +83,25 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .chart-header strong { display: block; margin-top: 7px; font-size: 14px; }
 .chart-controls { color: #9daccc; font-size: 12px; display: flex; gap: 13px; align-items: center; }
 .chart-controls input { width: 128px; accent-color: #38a7e4; }
+.zoom-button { width: 24px; height: 24px; border: 1px solid #304168; border-radius: 4px; color: #dce8ff; background: #11193b; padding: 0; line-height: 1; }
 .graph-wrap { padding: 22px 23px 10px; }
 .graph-wrap svg { width: 100%; height: 320px; overflow: visible; }
 .grid-lines line { stroke: #202b50; stroke-width: 1; }
-.payoff-line { fill: none; stroke: #5cdd86; stroke-width: 4; stroke-linejoin: round; }
-.loss-fill { fill: #e55065; opacity: .15; }
+.payoff-line { fill: none; stroke-width: 4; stroke-linejoin: round; }
+.profit-line { stroke: #5cdd86; }
+.loss-line { stroke: #ef6877; }
+.profit-fill { fill: #42d77d; opacity: .15; }
+.loss-fill { fill: #e55065; opacity: .2; }
 .reference-line { stroke: #5aa8d9; stroke-dasharray: 3 5; }
 .breakeven-line { stroke: #f4a94e; stroke-dasharray: 7 5; }
+.graph-hit-area { fill: transparent; cursor: crosshair; }
+.hover-line { stroke: #e6efff; stroke-dasharray: 4 4; stroke-width: 1.5; pointer-events: none; }
+.hover-dot { stroke: #0b1030; stroke-width: 2; pointer-events: none; }
+.hover-dot.profit { fill: #5cdd86; }
+.hover-dot.loss { fill: #ef6877; }
+.graph-tooltip { pointer-events: none; }
+.graph-tooltip rect { fill: #07102d; stroke: #6e86b4; stroke-width: 1; }
+.graph-tooltip text { fill: #f4f6ff; font-size: 12px; }
 svg text { fill: #8ea1c7; font-size: 13px; }
 .axis-labels { display: flex; justify-content: space-between; color: #7d8bac; font-size: 11px; padding: 0 12px; }
 .display-bar { justify-content: space-between; padding: 13px 17px; border-top: 1px solid #20294b; }

@@ -2,11 +2,13 @@ import type { ChainExpiration, OptionContract } from "./api";
 import type { Leg, OptionType, Side } from "./types";
 
 export type StrikeRole = "anchor" | "lower" | "upper" | "far-lower" | "far-upper";
+export type ExpiryRole = "near" | "far";
 
 export type StrategyTemplateLeg = {
   side: Side;
   type: OptionType;
   strikeRole: StrikeRole;
+  expiryRole?: ExpiryRole;
 };
 
 export type StrategyTemplate = {
@@ -38,12 +40,20 @@ export const STRATEGY_TEMPLATES = {
     label: "Short Put",
     legs: [{ side: "sell", type: "put", strikeRole: "anchor" }]
   },
-  "vertical-spread": {
-    id: "vertical-spread",
-    label: "Vertical Spread",
+  "call-credit-spread": {
+    id: "call-credit-spread",
+    label: "Call Credit Spread",
     legs: [
-      { side: "buy", type: "call", strikeRole: "anchor" },
-      { side: "sell", type: "call", strikeRole: "upper" }
+      { side: "sell", type: "call", strikeRole: "anchor" },
+      { side: "buy", type: "call", strikeRole: "upper" }
+    ]
+  },
+  "put-credit-spread": {
+    id: "put-credit-spread",
+    label: "Put Credit Spread",
+    legs: [
+      { side: "sell", type: "put", strikeRole: "anchor" },
+      { side: "buy", type: "put", strikeRole: "lower" }
     ]
   },
   straddle: {
@@ -60,6 +70,30 @@ export const STRATEGY_TEMPLATES = {
     legs: [
       { side: "buy", type: "put", strikeRole: "lower" },
       { side: "buy", type: "call", strikeRole: "upper" }
+    ]
+  },
+  "short-strangle": {
+    id: "short-strangle",
+    label: "Short Strangle",
+    legs: [
+      { side: "sell", type: "put", strikeRole: "lower" },
+      { side: "sell", type: "call", strikeRole: "upper" }
+    ]
+  },
+  "calendar-spread": {
+    id: "calendar-spread",
+    label: "Calendar Spread",
+    legs: [
+      { side: "sell", type: "call", strikeRole: "anchor", expiryRole: "near" },
+      { side: "buy", type: "call", strikeRole: "anchor", expiryRole: "far" }
+    ]
+  },
+  "diagonal-spread": {
+    id: "diagonal-spread",
+    label: "Diagonal Spread",
+    legs: [
+      { side: "sell", type: "call", strikeRole: "upper", expiryRole: "near" },
+      { side: "buy", type: "call", strikeRole: "anchor", expiryRole: "far" }
     ]
   },
   "iron-condor": {
@@ -100,9 +134,35 @@ export function resolveStrategyTemplateContracts(
   template: StrategyTemplate,
   anchorStrike: number
 ): OptionContract[] | null {
-  const matchingByLeg = template.legs.map((spec) => expiry.contracts
-      .filter((contract) => contract.active && contract.option_type === spec.type)
-      .sort((left, right) => left.strike - right.strike));
+  return resolveStrategyTemplateContractsForExpiries(
+    template.legs.map(() => expiry),
+    template,
+    anchorStrike
+  );
+}
+
+export function resolveStrategyTemplateContractsForChain(
+  expirations: readonly ChainExpiration[],
+  template: StrategyTemplate,
+  anchorStrike: number,
+  nearExpiryDate?: string
+): OptionContract[] | null {
+  const nearExpiry = expirations.find((item) => item.expiration_date === nearExpiryDate) ?? expirations[0];
+  if (!nearExpiry) return null;
+  const farExpiry = expirations.find((item) => item.expiration_date > nearExpiry.expiration_date);
+  const selectedExpiries = template.legs.map((spec) => spec.expiryRole === "far" ? farExpiry : nearExpiry);
+  if (selectedExpiries.some((expiry): expiry is undefined => expiry === undefined)) return null;
+  return resolveStrategyTemplateContractsForExpiries(selectedExpiries as ChainExpiration[], template, anchorStrike);
+}
+
+function resolveStrategyTemplateContractsForExpiries(
+  expiries: readonly ChainExpiration[],
+  template: StrategyTemplate,
+  anchorStrike: number
+): OptionContract[] | null {
+  const matchingByLeg = template.legs.map((spec, index) => expiries[index].contracts
+    .filter((contract) => contract.active && contract.option_type === spec.type)
+    .sort((left, right) => left.strike - right.strike));
   const strikesByRole = new Map<StrikeRole, number[]>();
   template.legs.forEach((spec, index) => {
     const strikes = [...new Set(matchingByLeg[index].map((contract) => contract.strike))];

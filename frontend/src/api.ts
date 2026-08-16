@@ -33,6 +33,16 @@ export type OptionChainResponse = DataContext & {
   expirations: ChainExpiration[];
 };
 
+export type SymbolResult = {
+  symbol: string;
+  description: string;
+};
+
+export type SymbolSearchResponse = DataContext & {
+  query: string;
+  items: SymbolResult[];
+};
+
 export type GreekSnapshot = {
   implied_volatility: number | null;
   delta: number | null;
@@ -86,6 +96,10 @@ async function getJSON<T>(path: string): Promise<T> {
 
 export function fetchHealth(): Promise<HealthResponse> {
   return getJSON<HealthResponse>("/api/health");
+}
+
+export function fetchSymbolSearch(query: string): Promise<SymbolSearchResponse> {
+  return getJSON<SymbolSearchResponse>(`/api/symbols/search?query=${encodeURIComponent(query)}`);
 }
 
 export function fetchChain(symbol: string): Promise<OptionChainResponse> {

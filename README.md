@@ -69,17 +69,23 @@ npm run dev
 
 The fixture UI is intentionally usable without backend credentials. It now
 consumes the stable market-data contract for fixture mode: the chain, underlying
-quote, option midpoint, pricing mode, source timestamp, and delayed/stale state
-come from the backend. The expiration payoff remains a clearly labelled local
-modelled scenario. The current single-leg builder forms and four canonical
-multi-leg forms—Vertical Spread, Long Straddle, Long Strangle, and Iron Condor—
+quote, selected bid/ask/midpoint price, pricing mode, source timestamp, and
+delayed/stale state come from the backend. The pricing selector applies one
+explicit mode to the underlying and every option leg. The expiration payoff
+remains a clearly labelled local modelled scenario. The current single-leg
+builder forms and canonical multi-leg forms—Call Credit Spread, Put Credit
+Spread, Long Straddle, Long Strangle, Short Strangle, Iron Condor, Calendar
+Spread, and Diagonal Spread—
 are represented by an explicit strategy template registry, with Long Call as the
 default. Selecting a template resolves its named legs against the loaded chain;
 the existing multi-leg seam still allows those legs to be selected, edited, and
 removed. Aggregate cash-flow and expiration-profile summaries remain separate
 from observed market data. Aggregate expiration output is withheld while a leg
 is unpriced or expiries are not aligned; multi-expiry and pre-expiry modelling
-remain later work. The payoff panel also supports graph and table display modes.
+remain later work. The payoff panel supports graph and table display modes, a
+zoomable signed profit/loss graph with breakeven markers, and a hover readout
+for underlying price and modelled P&L. Each active leg also has an explicit
+contract-backed strike picker rather than a continuous slider.
 
 ## Verification
 
@@ -100,12 +106,14 @@ symbol search, expirations, option chains, quotes, and Greeks. No order or
 account APIs are included.
 
 The current Milestone 2 builder slice is also implemented in fixture mode: the
-strategy registry covers the existing single-leg forms plus Vertical Spread,
-Long Straddle, Long Strangle, and Iron Condor; explicit multi-leg editing,
-aggregate cash-flow and expiration payoff summaries, and graph/table display
-are verified in the current builder. Remaining builder work is listed in
-[docs/BACKLOG.md](docs/BACKLOG.md), including user-selectable bid/ask pricing,
-pre-expiry modelling, and saved strategies.
+strategy registry covers the existing single-leg forms plus Call Credit Spread,
+Put Credit Spread, Long Straddle, Long Strangle, Short Strangle, Iron Condor,
+Calendar Spread, and Diagonal Spread; explicit multi-leg editing,
+user-selectable bid/ask/midpoint pricing, aggregate cash-flow and expiration
+payoff summaries, and the signed, zoomable graph/table display are verified in
+the current builder.
+Remaining builder work is listed in [docs/BACKLOG.md](docs/BACKLOG.md),
+including pre-expiry modelling and saved strategies.
 
 The existing authenticated live smoke-test record is in
 [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); this checkout did not have the private

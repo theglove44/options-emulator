@@ -3,6 +3,7 @@ import { initialLeg } from "./mockData";
 import {
   DEFAULT_STRATEGY_TEMPLATE_ID,
   resolveStrategyTemplateContracts,
+  resolveStrategyTemplateContractsForChain,
   STRATEGY_TEMPLATES,
   getStrategyTemplate,
   templateForLeg
@@ -32,9 +33,13 @@ describe("strategy template registry", () => {
       "short-call",
       "long-put",
       "short-put",
-      "vertical-spread",
+      "call-credit-spread",
+      "put-credit-spread",
       "straddle",
       "strangle",
+      "short-strangle",
+      "calendar-spread",
+      "diagonal-spread",
       "iron-condor"
     ]);
   });
@@ -48,14 +53,30 @@ describe("strategy template registry", () => {
   });
 
   it("defines explicit canonical legs for the new strategy families", () => {
-    expect(STRATEGY_TEMPLATES["vertical-spread"].legs).toEqual([
-      { side: "buy", type: "call", strikeRole: "anchor" },
-      { side: "sell", type: "call", strikeRole: "upper" }
+    expect(STRATEGY_TEMPLATES["call-credit-spread"].legs).toEqual([
+      { side: "sell", type: "call", strikeRole: "anchor" },
+      { side: "buy", type: "call", strikeRole: "upper" }
+    ]);
+    expect(STRATEGY_TEMPLATES["put-credit-spread"].legs).toEqual([
+      { side: "sell", type: "put", strikeRole: "anchor" },
+      { side: "buy", type: "put", strikeRole: "lower" }
     ]);
     expect(STRATEGY_TEMPLATES.straddle.legs).toHaveLength(2);
     expect(STRATEGY_TEMPLATES.strangle.legs).toEqual([
       { side: "buy", type: "put", strikeRole: "lower" },
       { side: "buy", type: "call", strikeRole: "upper" }
+    ]);
+    expect(STRATEGY_TEMPLATES["short-strangle"].legs).toEqual([
+      { side: "sell", type: "put", strikeRole: "lower" },
+      { side: "sell", type: "call", strikeRole: "upper" }
+    ]);
+    expect(STRATEGY_TEMPLATES["calendar-spread"].legs).toEqual([
+      { side: "sell", type: "call", strikeRole: "anchor", expiryRole: "near" },
+      { side: "buy", type: "call", strikeRole: "anchor", expiryRole: "far" }
+    ]);
+    expect(STRATEGY_TEMPLATES["diagonal-spread"].legs).toEqual([
+      { side: "sell", type: "call", strikeRole: "upper", expiryRole: "near" },
+      { side: "buy", type: "call", strikeRole: "anchor", expiryRole: "far" }
     ]);
     expect(STRATEGY_TEMPLATES["iron-condor"].legs).toHaveLength(4);
   });
@@ -80,7 +101,38 @@ describe("strategy template registry", () => {
       "15call",
       "16call"
     ]);
-    expect(resolveStrategyTemplateContracts({ ...expiry, contracts: expiry.contracts.filter((contract) => contract.strike <= 14) }, STRATEGY_TEMPLATES["vertical-spread"], 14.18)).toBeNull();
+    expect(resolveStrategyTemplateContracts({ ...expiry, contracts: expiry.contracts.filter((contract) => contract.strike <= 14) }, STRATEGY_TEMPLATES["call-credit-spread"], 14.18)).toBeNull();
+  });
+
+  it("resolves near and far expiries for calendar and diagonal spreads", () => {
+    const farExpiry = {
+      ...expiry,
+      expiration_date: "2026-10-16",
+      days_to_expiration: 62,
+      contracts: expiry.contracts.map((contract) => ({ ...contract, expiration_date: "2026-10-16" }))
+    };
+
+    const calendar = resolveStrategyTemplateContractsForChain(
+      [expiry, farExpiry],
+      STRATEGY_TEMPLATES["calendar-spread"],
+      14.18,
+      expiry.expiration_date
+    );
+    expect(calendar?.map((contract) => `${contract.expiration_date}:${contract.strike}${contract.option_type}`)).toEqual([
+      "2026-09-18:14call",
+      "2026-10-16:14call"
+    ]);
+
+    const diagonal = resolveStrategyTemplateContractsForChain(
+      [expiry, farExpiry],
+      STRATEGY_TEMPLATES["diagonal-spread"],
+      14.18,
+      expiry.expiration_date
+    );
+    expect(diagonal?.map((contract) => `${contract.expiration_date}:${contract.strike}${contract.option_type}`)).toEqual([
+      "2026-09-18:15call",
+      "2026-10-16:14call"
+    ]);
   });
 
   it("resolves shared-role legs from common strikes", () => {

@@ -36,7 +36,7 @@ Acceptance criteria:
 
 ## Milestone 2: useful strategy builder
 
-- Long call, long put, vertical spreads, straddle, strangle, iron condor, and covered call.
+- Long call, long put, call/put credit spreads, long/short strangles, straddles, iron condors, calendars, and diagonals.
 - Add/remove/reorder legs.
 - Underlying stock legs.
 - Multiple expirations for calendars and diagonals.
