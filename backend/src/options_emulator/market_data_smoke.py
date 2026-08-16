@@ -128,9 +128,7 @@ async def run_smoke(
                     "delayed": item.delayed,
                     "stale": item.stale,
                     "delta": item.greeks.delta if item.greeks else None,
-                    "implied_volatility": (
-                        item.greeks.implied_volatility if item.greeks else None
-                    ),
+                    "implied_volatility": (item.greeks.implied_volatility if item.greeks else None),
                 }
                 for item in greeks.items
             ],
@@ -180,9 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         is_test=os.getenv("TASTYTRADE_IS_TEST", "false").lower() == "true",
     )
     try:
-        result = asyncio.run(
-            run_smoke(adapter, args.symbol, PricingMode(args.pricing_mode))
-        )
+        result = asyncio.run(run_smoke(adapter, args.symbol, PricingMode(args.pricing_mode)))
     except MarketDataNotConfigured:
         print(
             json.dumps(

@@ -12,9 +12,7 @@ from options_emulator.market_data_smoke import _load_private_env, run_smoke
 
 class MarketDataSmokeTests(unittest.TestCase):
     def test_fixture_summary_is_read_only_and_contains_observation_context(self) -> None:
-        result = asyncio.run(
-            run_smoke(FixtureMarketDataAdapter(), "ETHA", PricingMode.MIDPOINT)
-        )
+        result = asyncio.run(run_smoke(FixtureMarketDataAdapter(), "ETHA", PricingMode.MIDPOINT))
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["safety"]["broker_access"], "read_only")
@@ -38,9 +36,7 @@ class MarketDataSmokeTests(unittest.TestCase):
                 self.assertEqual(os.environ["TASTY_REFRESH_TOKEN"], "file-token")
 
     def test_summary_is_json_serialisable_without_adapter_credentials(self) -> None:
-        result = asyncio.run(
-            run_smoke(FixtureMarketDataAdapter(), "ETHA", PricingMode.MIDPOINT)
-        )
+        result = asyncio.run(run_smoke(FixtureMarketDataAdapter(), "ETHA", PricingMode.MIDPOINT))
 
         encoded = json.dumps(result)
         self.assertNotIn("TASTY_CLIENT_SECRET", encoded)

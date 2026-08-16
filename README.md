@@ -79,7 +79,7 @@ the existing multi-leg seam still allows those legs to be selected, edited, and
 removed. Aggregate cash-flow and expiration-profile summaries remain separate
 from observed market data. Aggregate expiration output is withheld while a leg
 is unpriced or expiries are not aligned; multi-expiry and pre-expiry modelling
-remain later work.
+remain later work. The payoff panel also supports graph and table display modes.
 
 ## Verification
 
@@ -93,12 +93,20 @@ npm run build
 
 ## Current milestone
 
-Milestone 1 now has the read-only adapter contract, fixture implementation, live
-tastytrade implementation, reusable authenticated smoke command, and fixture
-frontend wiring plus the strategy template registry for single-leg and the four
-canonical multi-leg strategy forms across symbol search, expirations, option
-chains, quotes, and Greeks. Fixture-mode multi-leg editing and position summary
-are also verified in the current builder.
+Milestone 1, the read-only market-data foundation, is complete: the normalised
+adapter contract, deterministic fixture implementation, live tastytrade
+implementation, authenticated smoke command, and fixture frontend wiring cover
+symbol search, expirations, option chains, quotes, and Greeks. No order or
+account APIs are included.
+
+The current Milestone 2 builder slice is also implemented in fixture mode: the
+strategy registry covers the existing single-leg forms plus Vertical Spread,
+Long Straddle, Long Strangle, and Iron Condor; explicit multi-leg editing,
+aggregate cash-flow and expiration payoff summaries, and graph/table display
+are verified in the current builder. Remaining builder work is listed in
+[docs/BACKLOG.md](docs/BACKLOG.md), including user-selectable bid/ask pricing,
+pre-expiry modelling, and saved strategies.
+
 The existing authenticated live smoke-test record is in
 [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); this checkout did not have the private
 backend environment, so no new live-authenticated result is claimed here.

@@ -10,12 +10,15 @@
 - [x] Add an authenticated, read-only market-data smoke command.
 - [x] Replace fixture quotes through the stable API contract.
 
-## Next
+## Completed builder slice
 
 - [x] Add strategy template registry for the existing Long/Short Call and Put single-leg shell.
 - [x] Add explicit multi-leg editing and aggregate position summary seam to the current builder.
 - [x] Add canonical Vertical Spread, Long Straddle, Long Strangle, and Iron Condor templates to the current builder.
-- [ ] Add graph/table display switch.
+- [x] Add graph/table display switch.
+
+## Next
+
 - [ ] Add bid/ask versus midpoint pricing mode.
 - [ ] Add scenario date and implied-volatility controls.
 - [ ] Add local saved strategies.
