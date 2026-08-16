@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchChain, fetchHealth, fetchQuotes } from "./api";
 import type { ChainExpiration, OptionChainResponse, OptionContract, QuoteResponse, QuoteSnapshot } from "./api";
 import { initialLeg } from "./mockData";
-import { buildPositionProfile, summarizePosition } from "./position";
-import { templateForLeg } from "./strategyTemplates";
+import { buildPositionProfile, hasUnboundedProfit, summarizePosition } from "./position";
+import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContracts, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
+import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
 import type { Leg } from "./types";
 
 const money = new Intl.NumberFormat("en-GB", {
@@ -31,16 +32,21 @@ function App() {
   const [mode, setMode] = useState<"fixture" | "tastytrade">("fixture");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [templateError, setTemplateError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [view, setView] = useState<"graph" | "table">("graph");
   const [range, setRange] = useState(14);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<StrategyTemplateId | "custom">(DEFAULT_STRATEGY_TEMPLATE_ID);
+  const templateChainSymbol = useRef<string | null>(null);
   const activeLeg = legs.find((item) => item.id === activeLegId) ?? legs[0] ?? initialLeg;
-  const strategyTemplate = templateForLeg(activeLeg);
+  const currentTemplateId = legs.length === 1 ? templateForLeg(activeLeg).id : selectedTemplateId;
+  const strategyTemplate = currentTemplateId === "custom" ? null : getStrategyTemplate(currentTemplateId);
 
   useEffect(() => {
     const requestedSymbol = symbol.trim().toUpperCase();
     if (!requestedSymbol) return;
     let cancelled = false;
+    setTemplateError(null);
     const timer = window.setTimeout(async () => {
       setLoading(true);
       setError(null);
@@ -60,6 +66,11 @@ function App() {
         setLegs((current) => current.map((item) => {
           const existingContract = findContract(nextChain, item);
           const contract = existingContract ?? chooseDefaultContract(nextChain, item.type);
+          const preserveInvalidTemplateLeg = current.length > 1
+            && selectedTemplateId !== "custom"
+            && chain?.underlying_symbol === requestedSymbol
+            && !existingContract;
+          if (preserveInvalidTemplateLeg) return { ...item, price: 0, priceLoaded: false };
           return contract
             ? { ...item, expiry: contract.expiration_date, strike: contract.strike, type: contract.option_type, price: 0, priceLoaded: false, multiplier: contract.shares_per_contract }
             : { ...item, expiry: "", strike: 0, price: 0, priceLoaded: false };
@@ -67,6 +78,7 @@ function App() {
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Market data could not be loaded");
+          templateChainSymbol.current = null;
           setChain(null);
           setUnderlyingResponse(null);
           setUnderlyingQuote(null);
@@ -84,6 +96,34 @@ function App() {
     };
   }, [symbol, refreshToken]);
 
+  useEffect(() => {
+    if (!chain) return;
+    const symbolChanged = templateChainSymbol.current !== chain.underlying_symbol;
+    templateChainSymbol.current = chain.underlying_symbol;
+    if (legs.length <= 1 || selectedTemplateId === "custom") return;
+    if (!symbolChanged) {
+      if (legs.some((item) => !findContract(chain, item))) setSelectedTemplateId("custom");
+      return;
+    }
+    const template = getStrategyTemplate(selectedTemplateId);
+    const expiry = chain.expirations.find((item) => item.expiration_date === legs[0].expiry) ?? chain.expirations[0];
+    if (!expiry) return;
+    const contracts = resolveStrategyTemplateContracts(expiry, template, spot != null && spot > 0 ? spot : legs[0].strike || 14);
+    if (!contracts) {
+      setSelectedTemplateId("custom");
+      return;
+    }
+    const nextLegs = buildTemplateLegs(template, contracts, expiry);
+    const unchanged = nextLegs.length === legs.length && nextLegs.every((nextLeg, index) => {
+      const current = legs[index];
+      return current.side === nextLeg.side && current.type === nextLeg.type && current.expiry === nextLeg.expiry && current.strike === nextLeg.strike;
+    });
+    if (!unchanged) {
+      setLegs(nextLegs);
+      setActiveLegId(nextLegs[0]?.id ?? initialLeg.id);
+    }
+  }, [chain, legs, selectedTemplateId, spot]);
+
   const selectedExpiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry);
   const strikeContracts = selectedExpiry?.contracts.filter((contract) => contract.option_type === activeLeg.type && contract.active) ?? [];
   const legContractKey = legs.map((item) => `${item.id}:${item.expiry}:${item.strike}:${item.type}`).join("|");
@@ -93,7 +133,10 @@ function App() {
       .filter((contract): contract is OptionContract => Boolean(contract)),
     [chain, legContractKey]
   );
-  const selectedContractKey = selectedContracts.map((contract) => contract.symbol).join("|");
+  const selectedContractKey = legs.map((item) => {
+    const contract = findContract(chain, item);
+    return `${item.id}:${item.side}:${contract?.symbol ?? `${item.expiry}:${item.strike}:${item.type}`}`;
+  }).join("|");
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +174,7 @@ function App() {
   const minPnl = profile.length ? Math.min(...profile.map((point) => point.pnl)) : 0;
   const summary = useMemo(() => summarizePosition(legs), [legs]);
   const breakeven = legs.length === 1 && activeLeg.priceLoaded ? calculateBreakeven(activeLeg) : null;
-  const strategyName = legs.length === 1 ? strategyTemplate.label : "Custom position";
+  const strategyName = strategyTemplate?.label ?? "Custom position";
   const breakevenChange = breakeven != null && spotValue > 0 ? ((breakeven / spotValue - 1) * 100).toFixed(1) : "0.0";
   const context = optionResponse ?? underlyingResponse ?? chain;
   const freshness = context?.stale ? "stale" : context?.delayed ? "delayed" : "observed";
@@ -143,7 +186,27 @@ function App() {
     : "Net cash flow";
 
   function updateActiveLeg(update: Partial<Leg>) {
-    setLegs((current) => current.map((item) => item.id === activeLeg.id ? { ...item, ...update } : item));
+    const nextLeg = { ...activeLeg, ...update };
+    setLegs((current) => current.map((item) => item.id === activeLeg.id ? nextLeg : item));
+    setSelectedTemplateId(legs.length === 1 ? templateForLeg(nextLeg).id : "custom");
+  }
+
+  function applyStrategyTemplate(templateId: StrategyTemplateId) {
+    if (!chain) return;
+    const template = getStrategyTemplate(templateId);
+    const expiry = chain.expirations.find((item) => item.expiration_date === activeLeg.expiry) ?? chain.expirations[0];
+    if (!expiry) return;
+    const anchorStrike = spotValue > 0 ? spotValue : activeLeg.strike > 0 ? activeLeg.strike : 14;
+    const contracts = resolveStrategyTemplateContracts(expiry, template, anchorStrike);
+    if (!contracts) {
+      setTemplateError(`${template.label} cannot be resolved from the available strikes for ${expiry.expiration_date}.`);
+      return;
+    }
+    setTemplateError(null);
+    const nextLegs = buildTemplateLegs(template, contracts, expiry);
+    setLegs(nextLegs);
+    setActiveLegId(nextLegs[0]?.id ?? initialLeg.id);
+    setSelectedTemplateId(templateId);
   }
 
   function chooseExpiry(expiry: ChainExpiration) {
@@ -165,21 +228,22 @@ function App() {
   }
 
   function switchType(positionLeg: Leg = activeLeg) {
-    const nextType = positionLeg.type === "call" ? "put" : "call";
+    const nextType: Leg["type"] = positionLeg.type === "call" ? "put" : "call";
     const expiry = chain?.expirations.find((item) => item.expiration_date === positionLeg.expiry);
     const matching = expiry?.contracts
       .filter((contract) => contract.option_type === nextType && contract.active)
       .sort((left, right) => Math.abs(left.strike - positionLeg.strike) - Math.abs(right.strike - positionLeg.strike))[0];
     setActiveLegId(positionLeg.id);
-    setLegs((current) => current.map((item) => item.id === positionLeg.id
-      ? { ...item, type: nextType, strike: matching?.strike ?? positionLeg.strike, price: 0, priceLoaded: false, multiplier: matching?.shares_per_contract ?? positionLeg.multiplier }
-      : item));
+    const nextLeg: Leg = { ...positionLeg, type: nextType, strike: matching?.strike ?? positionLeg.strike, price: 0, priceLoaded: false, multiplier: matching?.shares_per_contract ?? positionLeg.multiplier };
+    setLegs((current) => current.map((item) => item.id === positionLeg.id ? nextLeg : item));
+    setSelectedTemplateId(legs.length === 1 ? templateForLeg(nextLeg).id : "custom");
   }
 
   function addLeg() {
     const nextId = nextLegId(legs);
     setLegs([...legs, { ...activeLeg, id: nextId }]);
     setActiveLegId(nextId);
+    setSelectedTemplateId("custom");
   }
 
   function removeLeg(legId: string = activeLeg.id) {
@@ -191,6 +255,7 @@ function App() {
       const nextActive = nextLegs[Math.min(activeIndex, nextLegs.length - 1)];
       setActiveLegId(nextActive.id);
     }
+    setSelectedTemplateId(nextLegs.length === 1 ? templateForLeg(nextLegs[0]).id : "custom");
   }
 
   return (
@@ -213,6 +278,17 @@ function App() {
             <h1>{strategyName}</h1>
           </div>
           <div className="toolbar-actions">
+            <label className="template-field">
+              <span>Template</span>
+              <select value={currentTemplateId} onChange={(event) => applyStrategyTemplate(event.target.value as StrategyTemplateId)} disabled={!chain} aria-label="Strategy template">
+                {currentTemplateId === "custom" && <option value="custom">Custom position</option>}
+                {Object.values(STRATEGY_TEMPLATES).map((template) => {
+                  const expiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry) ?? chain?.expirations[0];
+                  const available = expiry ? resolveStrategyTemplateContracts(expiry, template, spotValue > 0 ? spotValue : activeLeg.strike || 14) : false;
+                  return <option key={template.id} value={template.id} disabled={!available}>{template.label}</option>;
+                })}
+              </select>
+            </label>
             <button className="button primary" onClick={() => updateActiveLeg({ side: activeLeg.side === "buy" ? "sell" : "buy" })}>Flip side ↔</button>
             <button className="button" onClick={addLeg}>Positions ({summary.legCount}) +</button>
             <button className="button">Save trade ▣</button>
@@ -235,6 +311,7 @@ function App() {
         </section>
 
         {error && <div className="data-error" role="alert">Market data unavailable: {error}</div>}
+        {templateError && <div className="data-error" role="alert">Strategy template unavailable: {templateError}</div>}
 
         <section className="expiry-section">
           <div className="section-label">Expiration <strong>{selectedExpiry?.days_to_expiration ?? "—"}d</strong></div>
@@ -262,7 +339,7 @@ function App() {
         <section className="metrics-grid" aria-label="Position summary">
           <Metric label={cashFlowLabel} value={allLegsPriced ? money.format(Math.abs(summary.netCashFlow)) : "—"} tone="neutral" />
           <Metric label="Max loss" value={profile.length ? money.format(Math.abs(minPnl)) : "—"} tone="loss" />
-          <Metric label="Max profit" value={profile.length ? (maxPnl >= 100000 ? "Infinite" : money.format(maxPnl)) : "—"} tone="profit" />
+          <Metric label="Max profit" value={profile.length ? (hasUnboundedProfit(legs) ? "Infinite" : money.format(Math.max(maxPnl, 0))) : "—"} tone="profit" />
           <Metric label="Breakeven" value={breakeven != null && activeLeg.strike ? `${activeLeg.type === "call" ? "Above" : "Below"} ${breakeven.toFixed(2)}` : "Multi-leg"} detail={breakeven != null && activeLeg.strike ? `${Number(breakevenChange) >= 0 ? "+" : ""}${breakevenChange}%` : "See aggregate graph"} tone="neutral" />
         </section>
 
@@ -318,6 +395,23 @@ function findContract(chain: OptionChainResponse | null, leg: Leg): OptionContra
 
 function findQuote(response: QuoteResponse, symbol: string): QuoteSnapshot | null {
   return response.items.find((item) => item.symbol.toUpperCase() === symbol.toUpperCase()) ?? null;
+}
+
+function buildTemplateLegs(template: StrategyTemplate, contracts: OptionContract[], expiry: ChainExpiration): Leg[] {
+  return template.legs.map((spec, index) => {
+    const contract = contracts[index];
+    return {
+      ...initialLeg,
+      id: `leg-${index + 1}`,
+      side: spec.side,
+      type: spec.type,
+      expiry: contract?.expiration_date ?? expiry.expiration_date,
+      strike: contract?.strike ?? 0,
+      price: 0,
+      priceLoaded: false,
+      multiplier: contract?.shares_per_contract ?? 100
+    };
+  });
 }
 
 function nextLegId(legs: readonly Leg[]): string {

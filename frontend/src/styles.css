@@ -32,6 +32,8 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .button { background: #173358; color: #e8efff; border: 1px solid #2d5685; border-radius: 6px; padding: 9px 13px; font-size: 12px; }
 .button.primary { background: #2776b9; border-color: #55b6ec; }
 .button.subtle { background: transparent; border-color: #303e66; color: #a6b5d3; }
+.template-field { display: flex; align-items: center; gap: 7px; color: #8794b8; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.template-field select { color: #e8efff; background: #101838; border: 1px solid #3f5681; border-radius: 5px; padding: 9px 28px 9px 10px; font-size: 12px; text-transform: none; letter-spacing: 0; }
 
 .quote-row { gap: 16px; margin: 26px 0 21px; }
 .symbol-field { display: flex; align-items: center; gap: 8px; color: #8f9dc0; font-size: 12px; }

@@ -60,6 +60,46 @@ class DomainTests(unittest.TestCase):
 
         self.assertEqual(prices, [90.0, 95.0, 100.0, 105.0, 110.0])
 
+    def test_canonical_multi_leg_strategy_payoffs(self) -> None:
+        expiry = date(2026, 9, 18)
+        vertical = Position(
+            symbol="TEST",
+            legs=(
+                Leg(LegAction.BUY, 1, 0.90, option_type=OptionType.CALL, strike=14, expiry=expiry),
+                Leg(LegAction.SELL, 1, 0.40, option_type=OptionType.CALL, strike=15, expiry=expiry),
+            ),
+        )
+        straddle = Position(
+            symbol="TEST",
+            legs=(
+                Leg(LegAction.BUY, 1, 0.90, option_type=OptionType.CALL, strike=14, expiry=expiry),
+                Leg(LegAction.BUY, 1, 0.80, option_type=OptionType.PUT, strike=14, expiry=expiry),
+            ),
+        )
+        strangle = Position(
+            symbol="TEST",
+            legs=(
+                Leg(LegAction.BUY, 1, 0.40, option_type=OptionType.PUT, strike=13, expiry=expiry),
+                Leg(LegAction.BUY, 1, 0.50, option_type=OptionType.CALL, strike=15, expiry=expiry),
+            ),
+        )
+        iron_condor = Position(
+            symbol="TEST",
+            legs=(
+                Leg(LegAction.BUY, 1, 0.10, option_type=OptionType.PUT, strike=12, expiry=expiry),
+                Leg(LegAction.SELL, 1, 0.40, option_type=OptionType.PUT, strike=13, expiry=expiry),
+                Leg(LegAction.SELL, 1, 0.40, option_type=OptionType.CALL, strike=15, expiry=expiry),
+                Leg(LegAction.BUY, 1, 0.10, option_type=OptionType.CALL, strike=16, expiry=expiry),
+            ),
+        )
+
+        self.assertEqual(vertical.net_debit, 50.0)
+        self.assertAlmostEqual(vertical.expiration_pnl(16), 50.0)
+        self.assertAlmostEqual(straddle.expiration_pnl(14), -170.0)
+        self.assertAlmostEqual(strangle.expiration_pnl(12), 10.0)
+        self.assertEqual(iron_condor.net_credit, 60.0)
+        self.assertAlmostEqual(iron_condor.expiration_pnl(14), 60.0)
+
 
 if __name__ == "__main__":
     unittest.main()
