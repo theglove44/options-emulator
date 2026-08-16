@@ -20,6 +20,9 @@ dev = [
     "ruff>=0.6,<1",
 ]
 
+[project.scripts]
+options-emulator-market-data-smoke = "options_emulator.market_data_smoke:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

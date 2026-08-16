@@ -32,6 +32,21 @@ uvicorn options_emulator.api:app --reload --port 8765
 
 The backend defaults to deterministic fixture mode. The read-only tastytrade adapter is selected explicitly with `MARKET_DATA_MODE=tastytrade`; credentials remain in the backend environment and are never sent to the browser.
 
+The reusable authenticated smoke command reads `TASTY_CLIENT_SECRET` and
+`TASTY_REFRESH_TOKEN` from the backend environment or a local `backend/.env`
+file, and prints only sanitised market-data metadata. It uses symbol search,
+chain, quote, and Greeks reads; it never previews, submits, amends, cancels, or
+mutates an order or account:
+
+```bash
+cd backend
+.venv/bin/options-emulator-market-data-smoke --symbol SPY
+```
+
+The command exits with a blocked status when private credentials are absent. A
+successful command output is required before claiming current authenticated
+live verification; fixture/API verification does not substitute for that.
+
 The market-data endpoints are:
 
 - `GET /api/symbols/search?query=ETHA`
@@ -52,9 +67,19 @@ npm install
 npm run dev
 ```
 
-The fixture UI is intentionally usable without backend credentials. The next UI
-step is to consume the stable market-data contract rather than calculating a
-second copy of the fixture data in the browser.
+The fixture UI is intentionally usable without backend credentials. It now
+consumes the stable market-data contract for fixture mode: the chain, underlying
+quote, option midpoint, pricing mode, source timestamp, and delayed/stale state
+come from the backend. The expiration payoff remains a clearly labelled local
+modelled scenario. The current single-leg builder forms and four canonical
+multi-leg forms—Vertical Spread, Long Straddle, Long Strangle, and Iron Condor—
+are represented by an explicit strategy template registry, with Long Call as the
+default. Selecting a template resolves its named legs against the loaded chain;
+the existing multi-leg seam still allows those legs to be selected, edited, and
+removed. Aggregate cash-flow and expiration-profile summaries remain separate
+from observed market data. Aggregate expiration output is withheld while a leg
+is unpriced or expiries are not aligned; multi-expiry and pre-expiry modelling
+remain later work.
 
 ## Verification
 
@@ -68,11 +93,15 @@ npm run build
 
 ## Current milestone
 
-Milestone 1 now has the read-only adapter contract, fixture implementation, and
-live tastytrade implementation for symbol search, expirations, option chains,
-quotes, and Greeks. The authenticated live smoke-test record is in
-[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); frontend wiring remains a separate
-verification step.
+Milestone 1 now has the read-only adapter contract, fixture implementation, live
+tastytrade implementation, reusable authenticated smoke command, and fixture
+frontend wiring plus the strategy template registry for single-leg and the four
+canonical multi-leg strategy forms across symbol search, expirations, option
+chains, quotes, and Greeks. Fixture-mode multi-leg editing and position summary
+are also verified in the current builder.
+The existing authenticated live smoke-test record is in
+[docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); this checkout did not have the private
+backend environment, so no new live-authenticated result is claimed here.
 
 See [docs/SPEC.md](docs/SPEC.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
 [docs/BACKLOG.md](docs/BACKLOG.md), and [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md).

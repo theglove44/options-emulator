@@ -7,14 +7,14 @@
 - [x] Add tested expiration P&L domain model.
 - [x] Connect a read-only tastytrade chain adapter behind a normalised contract.
 - [x] Add fixture and tastytrade routes for symbol search, expirations, chains, quotes, and Greeks.
-- [ ] Add an authenticated, read-only market-data smoke command.
-- [ ] Replace fixture quotes through the stable API contract.
+- [x] Add an authenticated, read-only market-data smoke command.
+- [x] Replace fixture quotes through the stable API contract.
 
 ## Next
 
-- [ ] Add strategy template registry.
-- [ ] Add multi-leg editing and position summary.
-- [ ] Add vertical spreads, straddles, strangles, and iron condors.
+- [x] Add strategy template registry for the existing Long/Short Call and Put single-leg shell.
+- [x] Add explicit multi-leg editing and aggregate position summary seam to the current builder.
+- [x] Add canonical Vertical Spread, Long Straddle, Long Strangle, and Iron Condor templates to the current builder.
 - [ ] Add graph/table display switch.
 - [ ] Add bid/ask versus midpoint pricing mode.
 - [ ] Add scenario date and implied-volatility controls.
