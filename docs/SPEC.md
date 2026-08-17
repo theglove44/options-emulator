@@ -9,9 +9,9 @@ Provide a fast local workspace for constructing and analysing options strategies
 1. Search for an underlying.
 2. Load its expirations and option chain.
 3. Choose a strategy template or add individual legs.
-4. Select expiry, strike, side, quantity, and pricing mode.
+4. Select expiry, strike, side, quantity, pricing mode, and scenario assumptions.
 5. Recalculate the position immediately.
-6. Inspect summary metrics, an expiration payoff curve, and a price/date P&L table.
+6. Inspect summary metrics, an expiration payoff curve, and an expiration-only P&L table.
 7. Save the strategy locally for later review.
 
 ## Milestone 0: project and fixture vertical slice
@@ -44,6 +44,10 @@ Acceptance criteria:
 - Pre-expiry scenario pricing using an explicit model and per-leg IV.
 - Table and graph display modes.
 - Local saved strategies.
+
+Scenario date and implied-volatility controls are recorded separately from
+observed quotes in the current builder, but do not alter the expiration-only
+payoff until the later pre-expiry pricing model is deliberately implemented.
 
 ## Milestone 3: analysis tools
 

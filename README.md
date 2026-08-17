@@ -79,7 +79,10 @@ the existing multi-leg seam still allows those legs to be selected, edited, and
 removed. Aggregate cash-flow and expiration-profile summaries remain separate
 from observed market data. Aggregate expiration output is withheld while a leg
 is unpriced or expiries are not aligned; multi-expiry and pre-expiry modelling
-remain later work. The payoff panel also supports graph and table display modes.
+remain later work. Scenario date and active-leg implied-volatility controls now
+record explicit assumptions, but are clearly not applied to the current
+expiration-only model. The payoff panel also supports graph and table display
+modes.
 
 ## Verification
 
@@ -103,7 +106,9 @@ The current Milestone 2 builder slice is also implemented in fixture mode: the
 strategy registry covers the existing single-leg forms plus Vertical Spread,
 Long Straddle, Long Strangle, and Iron Condor; explicit multi-leg editing,
 aggregate cash-flow and expiration payoff summaries, and graph/table display
-are verified in the current builder. Remaining builder work is listed in
+are verified in the current builder. Scenario date and active-leg IV controls
+are recorded separately from observed quotes; pre-expiry valuation remains a
+later modelled slice. Remaining builder work is listed in
 [docs/BACKLOG.md](docs/BACKLOG.md), including user-selectable bid/ask pricing,
 pre-expiry modelling, and saved strategies.
 

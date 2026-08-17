@@ -16,11 +16,11 @@
 - [x] Add explicit multi-leg editing and aggregate position summary seam to the current builder.
 - [x] Add canonical Vertical Spread, Long Straddle, Long Strangle, and Iron Condor templates to the current builder.
 - [x] Add graph/table display switch.
+- [x] Add scenario date and active-leg implied-volatility controls as recorded assumptions; keep the current output expiration-only.
 
 ## Next
 
 - [ ] Add bid/ask versus midpoint pricing mode.
-- [ ] Add scenario date and implied-volatility controls.
 - [ ] Add local saved strategies.
 
 ## Later

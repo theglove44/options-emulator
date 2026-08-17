@@ -30,9 +30,9 @@ export function hasUnboundedProfit(legs: readonly Leg[]): boolean {
   return callExposure > 0;
 }
 
-export function buildPositionProfile(legs: readonly Leg[], spot: number): ProfilePoint[] {
-  const low = spot * 0.86;
-  const high = spot * 1.14;
+export function buildPositionProfile(legs: readonly Leg[], spot: number, range = 0.14): ProfilePoint[] {
+  const low = spot * (1 - range);
+  const high = spot * (1 + range);
   const sampledPrices = Array.from({ length: 33 }, (_, index) => low + ((high - low) * index) / 32);
   const prices = [...new Set([
     ...sampledPrices,

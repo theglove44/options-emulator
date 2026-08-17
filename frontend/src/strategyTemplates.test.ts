@@ -3,6 +3,7 @@ import { initialLeg } from "./mockData";
 import {
   DEFAULT_STRATEGY_TEMPLATE_ID,
   resolveStrategyTemplateContracts,
+  resolveStrategyTemplateContractsForChain,
   STRATEGY_TEMPLATES,
   getStrategyTemplate,
   templateForLeg
@@ -26,15 +27,20 @@ describe("strategy template registry", () => {
     })))
   };
 
-  it("registers the existing single-leg builder forms", () => {
+  it("registers the complete supported builder catalogue", () => {
     expect(Object.keys(STRATEGY_TEMPLATES)).toEqual([
       "long-call",
       "short-call",
       "long-put",
       "short-put",
+      "call-credit-spread",
+      "put-credit-spread",
       "vertical-spread",
       "straddle",
       "strangle",
+      "short-strangle",
+      "calendar-spread",
+      "diagonal-spread",
       "iron-condor"
     ]);
   });
@@ -57,6 +63,8 @@ describe("strategy template registry", () => {
       { side: "buy", type: "put", strikeRole: "lower" },
       { side: "buy", type: "call", strikeRole: "upper" }
     ]);
+    expect(STRATEGY_TEMPLATES["calendar-spread"].legs.map((leg) => leg.expiryRole)).toEqual(["near", "far"]);
+    expect(STRATEGY_TEMPLATES["diagonal-spread"].legs).toHaveLength(2);
     expect(STRATEGY_TEMPLATES["iron-condor"].legs).toHaveLength(4);
   });
 
@@ -99,5 +107,22 @@ describe("strategy template registry", () => {
       "16call",
       "16put"
     ]);
+  });
+
+  it("resolves calendar legs across the nearest two expirations", () => {
+    const laterExpiry = {
+      ...expiry,
+      expiration_date: "2026-10-16",
+      days_to_expiration: 62,
+      contracts: expiry.contracts.map((contract) => ({ ...contract, expiration_date: "2026-10-16" }))
+    };
+    const contracts = resolveStrategyTemplateContractsForChain(
+      [expiry, laterExpiry],
+      STRATEGY_TEMPLATES["calendar-spread"],
+      14.18,
+      expiry.expiration_date
+    );
+
+    expect(contracts?.map((contract) => contract.expiration_date)).toEqual(["2026-09-18", "2026-10-16"]);
   });
 });

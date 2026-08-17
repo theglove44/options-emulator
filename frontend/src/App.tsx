@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchChain, fetchHealth, fetchQuotes } from "./api";
-import type { ChainExpiration, OptionChainResponse, OptionContract, QuoteResponse, QuoteSnapshot } from "./api";
+import type { MouseEvent } from "react";
+import { fetchChain, fetchHealth, fetchQuotes, fetchSymbolSearch } from "./api";
+import type { ChainExpiration, OptionChainResponse, OptionContract, QuoteResponse, QuoteSnapshot, SymbolResult } from "./api";
 import { initialLeg } from "./mockData";
 import { buildPositionProfile, hasUnboundedProfit, summarizePosition } from "./position";
-import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContracts, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
+import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
 import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
+import { clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent } from "./scenario";
 import type { Leg } from "./types";
 
 const money = new Intl.NumberFormat("en-GB", {
@@ -22,6 +24,8 @@ const price = new Intl.NumberFormat("en-GB", {
 
 function App() {
   const [symbol, setSymbol] = useState("ETHA");
+  const [symbolInput, setSymbolInput] = useState("ETHA");
+  const [symbolSuggestions, setSymbolSuggestions] = useState<SymbolResult[]>([]);
   const [spot, setSpot] = useState<number | null>(null);
   const [legs, setLegs] = useState<Leg[]>([initialLeg]);
   const [activeLegId, setActiveLegId] = useState(initialLeg.id);
@@ -36,11 +40,35 @@ function App() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [view, setView] = useState<"graph" | "table">("graph");
   const [range, setRange] = useState(14);
+  const [scenarioDate, setScenarioDate] = useState("");
+  const [impliedVolatilityOverrides, setImpliedVolatilityOverrides] = useState<Record<string, number>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState<StrategyTemplateId | "custom">(DEFAULT_STRATEGY_TEMPLATE_ID);
   const templateChainSymbol = useRef<string | null>(null);
   const activeLeg = legs.find((item) => item.id === activeLegId) ?? legs[0] ?? initialLeg;
   const currentTemplateId = legs.length === 1 ? templateForLeg(activeLeg).id : selectedTemplateId;
   const strategyTemplate = currentTemplateId === "custom" ? null : getStrategyTemplate(currentTemplateId);
+
+  useEffect(() => {
+    const query = symbolInput.trim();
+    if (!query) {
+      setSymbolSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      fetchSymbolSearch(query)
+        .then((response) => {
+          if (!cancelled) setSymbolSuggestions(response.items);
+        })
+        .catch(() => {
+          if (!cancelled) setSymbolSuggestions([]);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [symbolInput]);
 
   useEffect(() => {
     const requestedSymbol = symbol.trim().toUpperCase();
@@ -65,7 +93,7 @@ function App() {
         setMode(health.mode);
         setLegs((current) => current.map((item) => {
           const existingContract = findContract(nextChain, item);
-          const contract = existingContract ?? chooseDefaultContract(nextChain, item.type);
+          const contract = existingContract ?? chooseDefaultContract(nextChain, item.type, item.expiry, underlying?.selected_price ?? item.strike);
           const preserveInvalidTemplateLeg = current.length > 1
             && selectedTemplateId !== "custom"
             && chain?.underlying_symbol === requestedSymbol
@@ -106,14 +134,19 @@ function App() {
       return;
     }
     const template = getStrategyTemplate(selectedTemplateId);
-    const expiry = chain.expirations.find((item) => item.expiration_date === legs[0].expiry) ?? chain.expirations[0];
-    if (!expiry) return;
-    const contracts = resolveStrategyTemplateContracts(expiry, template, spot != null && spot > 0 ? spot : legs[0].strike || 14);
+    const nearExpiry = chain.expirations.find((item) => item.expiration_date === legs[0].expiry) ?? chain.expirations[0];
+    if (!nearExpiry) return;
+    const contracts = resolveStrategyTemplateContractsForChain(
+      chain.expirations,
+      template,
+      spot != null && spot > 0 ? spot : legs[0].strike || 14,
+      nearExpiry.expiration_date
+    );
     if (!contracts) {
       setSelectedTemplateId("custom");
       return;
     }
-    const nextLegs = buildTemplateLegs(template, contracts, expiry);
+    const nextLegs = buildTemplateLegs(template, contracts, nearExpiry);
     const unchanged = nextLegs.length === legs.length && nextLegs.every((nextLeg, index) => {
       const current = legs[index];
       return current.side === nextLeg.side && current.type === nextLeg.type && current.expiry === nextLeg.expiry && current.strike === nextLeg.strike;
@@ -126,6 +159,14 @@ function App() {
 
   const selectedExpiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry);
   const strikeContracts = selectedExpiry?.contracts.filter((contract) => contract.option_type === activeLeg.type && contract.active) ?? [];
+  const scenarioMinimumDate = contextDate(chain);
+  const scenarioMaximumDate = selectedExpiry?.expiration_date ?? scenarioMinimumDate;
+  const activeContract = findContract(chain, activeLeg);
+  const activeOptionQuote = activeContract && optionResponse ? findQuote(optionResponse, activeContract.symbol) : null;
+  const observedImpliedVolatility = activeOptionQuote?.greeks?.implied_volatility ?? null;
+  const scenarioImpliedVolatility = activeContract
+    ? impliedVolatilityOverrides[activeContract.symbol] ?? observedImpliedVolatility
+    : null;
   const legContractKey = legs.map((item) => `${item.id}:${item.expiry}:${item.strike}:${item.type}`).join("|");
   const selectedContracts = useMemo(
     () => legs
@@ -166,9 +207,9 @@ function App() {
   const allLegsPriced = legs.every((item) => item.priceLoaded);
   const profile = useMemo(
     () => (spotValue > 0 && legs.length > 0 && !hasMixedExpiries && legs.every((item) => item.strike > 0 && item.priceLoaded)
-      ? buildPositionProfile(legs, spotValue)
+      ? buildPositionProfile(legs, spotValue, range / 100)
       : []),
-    [hasMixedExpiries, legs, spotValue]
+    [hasMixedExpiries, legs, range, spotValue]
   );
   const maxPnl = profile.length ? Math.max(...profile.map((point) => point.pnl)) : 0;
   const minPnl = profile.length ? Math.min(...profile.map((point) => point.pnl)) : 0;
@@ -185,25 +226,44 @@ function App() {
     ? (summary.netCashFlow > 0 ? "Net debit" : summary.netCashFlow < 0 ? "Net credit" : "Net cash flow")
     : "Net cash flow";
 
+  useEffect(() => {
+    if (!scenarioMinimumDate || !scenarioMaximumDate) return;
+    setScenarioDate((current) => clampScenarioDate(current || scenarioMinimumDate, scenarioMinimumDate, scenarioMaximumDate));
+  }, [scenarioMinimumDate, scenarioMaximumDate]);
+
   function updateActiveLeg(update: Partial<Leg>) {
     const nextLeg = { ...activeLeg, ...update };
     setLegs((current) => current.map((item) => item.id === activeLeg.id ? nextLeg : item));
     setSelectedTemplateId(legs.length === 1 ? templateForLeg(nextLeg).id : "custom");
   }
 
+  function commitSymbol(nextValue = symbolInput) {
+    const normalized = nextValue.trim().toUpperCase();
+    if (!normalized) return;
+    const suggestion = symbolSuggestions.find((item) => item.symbol.toUpperCase() === normalized);
+    const nextSymbol = suggestion?.symbol.toUpperCase() ?? normalized;
+    setSymbolInput(nextSymbol);
+    setSymbolSuggestions([]);
+    if (nextSymbol === symbol) {
+      setRefreshToken((value) => value + 1);
+      return;
+    }
+    setSymbol(nextSymbol);
+  }
+
   function applyStrategyTemplate(templateId: StrategyTemplateId) {
     if (!chain) return;
     const template = getStrategyTemplate(templateId);
-    const expiry = chain.expirations.find((item) => item.expiration_date === activeLeg.expiry) ?? chain.expirations[0];
-    if (!expiry) return;
+    const nearExpiry = chain.expirations.find((item) => item.expiration_date === activeLeg.expiry) ?? chain.expirations[0];
+    if (!nearExpiry) return;
     const anchorStrike = spotValue > 0 ? spotValue : activeLeg.strike > 0 ? activeLeg.strike : 14;
-    const contracts = resolveStrategyTemplateContracts(expiry, template, anchorStrike);
+    const contracts = resolveStrategyTemplateContractsForChain(chain.expirations, template, anchorStrike, nearExpiry.expiration_date);
     if (!contracts) {
-      setTemplateError(`${template.label} cannot be resolved from the available strikes for ${expiry.expiration_date}.`);
+      setTemplateError(`${template.label} cannot be resolved from the available expirations and strikes.`);
       return;
     }
     setTemplateError(null);
-    const nextLegs = buildTemplateLegs(template, contracts, expiry);
+    const nextLegs = buildTemplateLegs(template, contracts, nearExpiry);
     setLegs(nextLegs);
     setActiveLegId(nextLegs[0]?.id ?? initialLeg.id);
     setSelectedTemplateId(templateId);
@@ -283,8 +343,10 @@ function App() {
               <select value={currentTemplateId} onChange={(event) => applyStrategyTemplate(event.target.value as StrategyTemplateId)} disabled={!chain} aria-label="Strategy template">
                 {currentTemplateId === "custom" && <option value="custom">Custom position</option>}
                 {Object.values(STRATEGY_TEMPLATES).map((template) => {
-                  const expiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry) ?? chain?.expirations[0];
-                  const available = expiry ? resolveStrategyTemplateContracts(expiry, template, spotValue > 0 ? spotValue : activeLeg.strike || 14) : false;
+                  const nearExpiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry) ?? chain?.expirations[0];
+                  const available = chain && nearExpiry
+                    ? resolveStrategyTemplateContractsForChain(chain.expirations, template, spotValue > 0 ? spotValue : activeLeg.strike || 14, nearExpiry.expiration_date)
+                    : null;
                   return <option key={template.id} value={template.id} disabled={!available}>{template.label}</option>;
                 })}
               </select>
@@ -298,7 +360,23 @@ function App() {
         <section className="quote-row">
           <label className="symbol-field">
             <span>Symbol</span>
-            <input value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} />
+            <input
+              list="symbol-suggestions"
+              value={symbolInput}
+              onChange={(event) => setSymbolInput(event.target.value.toUpperCase())}
+              onBlur={() => commitSymbol()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitSymbol();
+                }
+              }}
+              aria-label="Underlying symbol"
+              placeholder="AAPL"
+            />
+            <datalist id="symbol-suggestions">
+              {symbolSuggestions.map((item) => <option key={item.symbol} value={item.symbol}>{item.description}</option>)}
+            </datalist>
           </label>
           <div className="spot-price">
             {spot != null ? money.format(spot) : "—"}
@@ -314,11 +392,11 @@ function App() {
         {templateError && <div className="data-error" role="alert">Strategy template unavailable: {templateError}</div>}
 
         <section className="expiry-section">
-          <div className="section-label">Expiration <strong>{selectedExpiry?.days_to_expiration ?? "—"}d</strong></div>
+          <div className="section-label">Expiration <strong>{selectedExpiry?.days_to_expiration ?? "—"}d</strong><span className="expiry-legend">Weekly / Monthly</span></div>
           <div className="expiry-track">
             {(chain?.expirations ?? []).map((item) => (
-              <button key={item.expiration_date} className={`expiry-pill ${item.expiration_date === activeLeg.expiry ? "selected" : ""}`} onClick={() => chooseExpiry(item)}>
-                <span>{formatExpiry(item.expiration_date)}</span><small>{item.days_to_expiration}d</small>
+              <button key={item.expiration_date} className={`expiry-pill ${item.expiration_date === activeLeg.expiry ? "selected" : ""}`} onClick={() => chooseExpiry(item)} aria-label={`${formatExpiry(item.expiration_date)} ${formatExpirationKind(item)} expiration, ${item.days_to_expiration} days`}>
+                <span>{formatExpiry(item.expiration_date)}</span><small><strong className="expiry-kind">{formatExpirationKind(item)}</strong><span>{item.days_to_expiration}d</span></small>
               </button>
             ))}
           </div>
@@ -328,6 +406,74 @@ function App() {
           <div className="section-label">Strike <strong>{activeLeg.strike || "—"}{activeLeg.type === "call" ? "C" : "P"}</strong></div>
           <input className="strike-slider" type="range" min={strikeContracts[0]?.strike ?? 0} max={strikeContracts.at(-1)?.strike ?? 1} step="0.5" value={activeLeg.strike || 0} onChange={(event) => chooseStrike(Number(event.target.value))} aria-label="Strike" disabled={!strikeContracts.length} />
           <div className="strike-scale"><span>{strikeContracts[0]?.strike ?? "—"}</span><span className="spot-marker">{symbol} {spot != null ? spot.toFixed(2) : "—"}</span><span>{strikeContracts.at(-1)?.strike ?? "—"}</span></div>
+        </section>
+
+        <section className="scenario-section" aria-label="Scenario controls">
+          <div className="scenario-heading">
+            <div><span className="section-label">Scenario inputs</span><strong>Recorded assumptions</strong></div>
+            <span className="scenario-status">Not applied to expiration model</span>
+          </div>
+          <div className="scenario-controls">
+            <label className="scenario-field">
+              <span>Scenario date</span>
+              <input
+                type="date"
+                value={scenarioDate}
+                min={scenarioMinimumDate}
+                max={scenarioMaximumDate}
+                onInput={(event) => {
+                  if (event.currentTarget.value) {
+                    setScenarioDate(clampScenarioDate(event.currentTarget.value, scenarioMinimumDate, scenarioMaximumDate));
+                  }
+                }}
+                onBlur={(event) => {
+                  if (event.currentTarget.value) {
+                    setScenarioDate(clampScenarioDate(event.currentTarget.value, scenarioMinimumDate, scenarioMaximumDate));
+                  }
+                }}
+                disabled={!scenarioMinimumDate || !scenarioMaximumDate}
+              />
+            </label>
+            <label className="scenario-field volatility-field">
+              <span>Active leg IV</span>
+              <div className="volatility-input">
+                <input
+                  type="number"
+                  min="0.1"
+                  max="500"
+                  step="0.1"
+                  value={scenarioImpliedVolatility == null ? "" : (scenarioImpliedVolatility * 100).toFixed(1)}
+                  onChange={(event) => {
+                    if (!activeContract) return;
+                    const parsed = parseVolatilityPercent(event.target.value);
+                    setImpliedVolatilityOverrides((current) => {
+                      const next = { ...current };
+                      if (parsed == null) delete next[activeContract.symbol];
+                      else next[activeContract.symbol] = parsed;
+                      return next;
+                    });
+                  }}
+                  placeholder="—"
+                  aria-label="Active leg implied volatility percentage"
+                  disabled={!activeContract}
+                />
+                <span>%</span>
+              </div>
+              <small>
+                {impliedVolatilityOverrides[activeContract?.symbol ?? ""] != null
+                  ? `Override ${formatVolatilityPercent(scenarioImpliedVolatility)}`
+                  : `Observed ${formatVolatilityPercent(observedImpliedVolatility)}`}
+              </small>
+            </label>
+            {activeContract && impliedVolatilityOverrides[activeContract.symbol] != null && (
+              <button className="button subtle scenario-reset" onClick={() => setImpliedVolatilityOverrides((current) => {
+                const next = { ...current };
+                delete next[activeContract.symbol];
+                return next;
+              })}>Use observed IV</button>
+            )}
+          </div>
+          <p className="scenario-note">The current payoff remains aggregate intrinsic value at expiration. Date and IV are recorded for the future pre-expiry model and do not change this output.</p>
         </section>
 
         <section className="position-summary" aria-label="Position summary details">
@@ -348,7 +494,9 @@ function App() {
             <div><span className="section-label">Projected outcome</span><strong>At expiration</strong></div>
             <div className="chart-controls">
               <span>Range ±{range}%</span>
-              <input type="range" min="8" max="30" value={range} onChange={(event) => setRange(Number(event.target.value))} aria-label="Price range" />
+              <button className="zoom-button" onClick={() => setRange((value) => Math.max(8, value - 5))} aria-label="Zoom in">−</button>
+              <input type="range" min="8" max="60" value={range} onChange={(event) => setRange(Number(event.target.value))} aria-label="Price range" />
+              <button className="zoom-button" onClick={() => setRange((value) => Math.min(60, value + 5))} aria-label="Zoom out">+</button>
             </div>
           </div>
           {profile.length ? (view === "graph" ? <PayoffGraph profile={profile} spot={spotValue} breakeven={breakeven ?? undefined} /> : <PayoffTable profile={profile} />) : <div className="empty-state">{!allLegsPriced ? "Loading observed quote data for the local expiration model…" : hasMixedExpiries ? "Align leg expiries before modelling the aggregate expiration outcome…" : "Select a valid contract for every leg to model the aggregate expiration outcome…"}</div>}
@@ -384,9 +532,16 @@ function App() {
   );
 }
 
-function chooseDefaultContract(chain: OptionChainResponse, optionType: "call" | "put"): OptionContract | undefined {
+function chooseDefaultContract(chain: OptionChainResponse, optionType: "call" | "put", preferredExpiry?: string, anchorStrike?: number): OptionContract | undefined {
   const contracts = chain.expirations.flatMap((expiration) => expiration.contracts).filter((contract) => contract.active);
-  return contracts.find((contract) => contract.option_type === optionType && contract.expiration_date === "2026-09-18" && contract.strike === 14) ?? contracts.find((contract) => contract.option_type === optionType) ?? contracts[0];
+  const preferred = contracts.filter((contract) => contract.option_type === optionType && contract.expiration_date === preferredExpiry);
+  const nearest = (candidates: OptionContract[]) => candidates
+    .slice()
+    .sort((left, right) => Math.abs(left.strike - (anchorStrike ?? 14)) - Math.abs(right.strike - (anchorStrike ?? 14)))[0];
+  return nearest(preferred)
+    ?? contracts.find((contract) => contract.option_type === optionType && contract.expiration_date === "2026-09-18" && contract.strike === 14)
+    ?? nearest(contracts.filter((contract) => contract.option_type === optionType))
+    ?? contracts[0];
 }
 
 function findContract(chain: OptionChainResponse | null, leg: Leg): OptionContract | undefined {
@@ -429,11 +584,43 @@ function formatExpiry(value: string): string {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "2-digit" }).format(new Date(`${value}T00:00:00Z`));
 }
 
+function formatExpirationKind(expiry: Pick<ChainExpiration, "expiration_date" | "expiration_type">): string {
+  const type = expiry.expiration_type.toLowerCase();
+  if (type.includes("weekly")) return "Weekly";
+  if (type.includes("monthly")) return "Monthly";
+  const date = new Date(`${expiry.expiration_date}T00:00:00Z`);
+  const isThirdFriday = date.getUTCDay() === 5 && date.getUTCDate() >= 15 && date.getUTCDate() <= 21;
+  return isThirdFriday ? "Monthly" : "Weekly";
+}
+
 function Metric({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone: "neutral" | "loss" | "profit" }) {
   return <div className="metric"><span>{label}</span><strong className={tone}>{value}</strong>{detail && <small>{detail}</small>}</div>;
 }
 
-function PayoffGraph({ profile, spot, breakeven }: { profile: { price: number; pnl: number }[]; spot: number; breakeven?: number }) {
+type GraphPoint = { price: number; pnl: number };
+
+function interpolateGraphPnl(profile: GraphPoint[], underlyingPrice: number): number {
+  const first = profile[0];
+  const last = profile.at(-1)!;
+  if (underlyingPrice <= first.price) return first.pnl;
+  if (underlyingPrice >= last.price) return last.pnl;
+
+  for (let index = 1; index < profile.length; index += 1) {
+    const current = profile[index];
+    if (underlyingPrice > current.price) continue;
+    const previous = profile[index - 1];
+    const ratio = (underlyingPrice - previous.price) / (current.price - previous.price);
+    return previous.pnl + (current.pnl - previous.pnl) * ratio;
+  }
+  return last.pnl;
+}
+
+function formatGraphPnl(value: number): string {
+  const formatted = price.format(value);
+  return value >= 0 ? `+${formatted}` : formatted;
+}
+
+function PayoffGraph({ profile, spot, breakeven }: { profile: GraphPoint[]; spot: number; breakeven?: number }) {
   const width = 1000;
   const height = 320;
   const min = Math.min(...profile.map((point) => point.pnl), 0);
@@ -442,12 +629,30 @@ function PayoffGraph({ profile, spot, breakeven }: { profile: { price: number; p
   const y = (pnl: number) => height - ((pnl - min) / (max - min || 1)) * height;
   const line = profile.map((point, index) => `${index === 0 ? "M" : "L"}${x(point.price).toFixed(1)},${y(point.pnl).toFixed(1)}`).join(" ");
   const area = `${line} L ${width},${height} L 0,${height} Z`;
-  return <div className="graph-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Projected profit and loss at expiration"><defs><linearGradient id="profitFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#42d77d" stopOpacity=".55" /><stop offset="100%" stopColor="#42d77d" stopOpacity="0" /></linearGradient></defs><g className="grid-lines"><line x1="0" y1={y(0)} x2={width} y2={y(0)} /><line x1="0" y1="80" x2={width} y2="80" /><line x1="0" y1="160" x2={width} y2="160" /><line x1="0" y1="240" x2={width} y2="240" /></g><path d={area} fill="url(#profitFill)" /><path className="loss-fill" d={`${line} L ${x(profile.at(-1)!.price)},${y(0)} L ${x(profile[0].price)},${y(0)} Z`} /><path className="payoff-line" d={line} /><line className="reference-line" x1={x(spot)} y1="0" x2={x(spot)} y2={height} />{breakeven != null && <><line className="breakeven-line" x1={x(breakeven)} y1="0" x2={x(breakeven)} y2={height} /><text x={x(breakeven) + 8} y="38">B/E {breakeven.toFixed(2)}</text></>}<text x={x(spot) + 8} y="18">Spot {spot.toFixed(2)}</text></svg><div className="axis-labels"><span>${profile[0].price.toFixed(2)}</span><span>${spot.toFixed(2)}</span><span>${profile.at(-1)!.price.toFixed(2)}</span></div></div>;
+  const [hovered, setHovered] = useState<{ price: number; pnl: number; x: number } | null>(null);
+
+  function handleMouseMove(event: MouseEvent<SVGRectElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const pointerX = Math.max(0, Math.min(width, ((event.clientX - bounds.left) / bounds.width) * width));
+    const hoveredPrice = profile[0].price + ((profile.at(-1)!.price - profile[0].price) * pointerX) / width;
+    setHovered({ price: hoveredPrice, pnl: interpolateGraphPnl(profile, hoveredPrice), x: pointerX });
+  }
+
+  const tooltipWidth = 178;
+  const tooltipHeight = 56;
+  const tooltipX = hovered == null ? 0 : Math.max(8, Math.min(width - tooltipWidth - 8, hovered.x + 12));
+  const tooltipY = hovered == null ? 0 : Math.max(8, Math.min(height - tooltipHeight - 8, y(hovered.pnl) - tooltipHeight - 10));
+
+  return <div className="graph-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Projected profit and loss at expiration"><defs><linearGradient id="profitFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#42d77d" stopOpacity=".55" /><stop offset="100%" stopColor="#42d77d" stopOpacity="0" /></linearGradient></defs><g className="grid-lines"><line x1="0" y1={y(0)} x2={width} y2={y(0)} /><line x1="0" y1="80" x2={width} y2="80" /><line x1="0" y1="160" x2={width} y2="160" /><line x1="0" y1="240" x2={width} y2="240" /></g><path d={area} fill="url(#profitFill)" /><path className="loss-fill" d={`${line} L ${x(profile.at(-1)!.price)},${y(0)} L ${x(profile[0].price)},${y(0)} Z`} /><path className="payoff-line" d={line} /><line className="reference-line" x1={x(spot)} y1="0" x2={x(spot)} y2={height} />{breakeven != null && <><line className="breakeven-line" x1={x(breakeven)} y1="0" x2={x(breakeven)} y2={height} /><text x={Math.min(width - 76, x(breakeven) + 8)} y="38">B/E {breakeven.toFixed(2)}</text></>}<text x={Math.min(width - 88, x(spot) + 8)} y="18">Spot {spot.toFixed(2)}</text><rect className="graph-hit-area" x="0" y="0" width={width} height={height} onMouseMove={handleMouseMove} onMouseLeave={() => setHovered(null)} />{hovered != null && <><line className="hover-line" x1={hovered.x} y1="0" x2={hovered.x} y2={height} /><circle className={`hover-dot ${hovered.pnl >= 0 ? "profit" : "loss"}`} cx={hovered.x} cy={y(hovered.pnl)} r="5" /><g className="graph-tooltip" transform={`translate(${tooltipX},${tooltipY})`}><rect width={tooltipWidth} height={tooltipHeight} rx="6" /><text x="10" y="21">Underlying {price.format(hovered.price)}</text><text x="10" y="42">P&amp;L {formatGraphPnl(hovered.pnl)}</text></g></>}</svg><div className="axis-labels"><span>${profile[0].price.toFixed(2)}</span><span>${spot.toFixed(2)}</span><span>${profile.at(-1)!.price.toFixed(2)}</span></div></div>;
+}
+
+function contextDate(context: { observed_at?: string } | null): string {
+  return context?.observed_at?.slice(0, 10) ?? "";
 }
 
 function PayoffTable({ profile }: { profile: { price: number; pnl: number }[] }) {
   const sample = profile.filter((_, index) => index % 2 === 0);
-  return <div className="payoff-table"><div className="table-head"><span>Underlying</span><span>Now</span><span>+7 days</span><span>+14 days</span><span>At expiry</span></div>{sample.map((point) => <div className="table-row" key={point.price}><span>${point.price.toFixed(2)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl * .84)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl * .92)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl)}</span></div>)}</div>;
+  return <div className="payoff-table"><div className="table-head"><span>Underlying</span><span>At expiration</span></div>{sample.map((point) => <div className="table-row" key={point.price}><span>${point.price.toFixed(2)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl)}</span></div>)}</div>;
 }
 
 export default App;
