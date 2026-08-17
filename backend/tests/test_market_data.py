@@ -33,6 +33,21 @@ class MarketDataTests(unittest.TestCase):
         self.assertEqual(quotes.pricing_mode, PricingMode.ASK)
         self.assertEqual(quotes.items[0].observed_at.tzinfo.utcoffset(None).total_seconds(), 0)
 
+    def test_fixture_symbol_changes_have_distinct_chain_and_underlying_context(self) -> None:
+        etha_chain = asyncio.run(self.adapter.get_chain("ETHA"))
+        aapl_chain = asyncio.run(self.adapter.get_chain("AAPL"))
+        aapl_quote = asyncio.run(self.adapter.get_quotes(["AAPL"], PricingMode.MIDPOINT)).items[0]
+
+        self.assertNotEqual(
+            etha_chain.expirations[0].contracts[0].strike,
+            aapl_chain.expirations[0].contracts[0].strike,
+        )
+        self.assertAlmostEqual(aapl_quote.selected_price, 225.4)
+        self.assertIn(
+            225.0,
+            [contract.strike for contract in aapl_chain.expirations[0].contracts],
+        )
+
     def test_fixture_option_quote_contains_greeks_and_contract_metadata(self) -> None:
         symbol = "ETHA  260918C00014000"
         quotes = asyncio.run(self.adapter.get_quotes([symbol], PricingMode.MIDPOINT))

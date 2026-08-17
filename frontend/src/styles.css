@@ -65,6 +65,21 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .strike-empty { grid-column: 1 / -1; color: #8794b8; font-size: 12px; padding: 10px 0; }
 .strike-context { display: flex; justify-content: space-between; margin-top: 10px; color: #7482a6; font-size: 11px; }
 .spot-marker { color: #e8efff; }
+.expiry-pill.selected .expiry-kind { color: #d8f3ff; }
+.scenario-section { margin: 11px 0 18px; padding: 16px 18px 14px; border: 1px solid #26345c; background: #0d1434; }
+.scenario-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.scenario-heading strong { display: block; margin-top: 6px; font-size: 14px; }
+.scenario-status { color: #d6b85a; font-size: 11px; }
+.scenario-controls { display: flex; align-items: flex-start; gap: 18px; margin-top: 15px; }
+.scenario-field { display: flex; flex-direction: column; gap: 7px; color: #8f9dc0; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.scenario-field input { color: #e8efff; background: #101838; border: 1px solid #3f5681; border-radius: 5px; padding: 8px 10px; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.scenario-field input:disabled { opacity: .55; }
+.volatility-input { display: flex; align-items: center; gap: 7px; }
+.volatility-input input { width: 92px; }
+.volatility-input span { color: #9aa9c8; font-size: 12px; }
+.scenario-field small { color: #7180a2; font-size: 10px; text-transform: none; letter-spacing: 0; }
+.scenario-reset { margin-top: 22px; white-space: nowrap; }
+.scenario-note { margin: 12px 0 0; color: #7180a2; font-size: 11px; line-height: 1.5; }
 
 .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin: 11px 0 18px; background: #222c50; border: 1px solid #222c50; }
 .metric { min-height: 87px; padding: 18px 20px; background: #0e1433; display: flex; flex-direction: column; gap: 8px; }

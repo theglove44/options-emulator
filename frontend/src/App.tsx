@@ -5,6 +5,7 @@ import { initialLeg } from "./mockData";
 import { buildPositionProfile, hasUnboundedProfit, summarizePosition } from "./position";
 import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
 import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
+import { clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent } from "./scenario";
 import type { Leg } from "./types";
 
 const money = new Intl.NumberFormat("en-GB", {
@@ -39,6 +40,8 @@ function App() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [view, setView] = useState<"graph" | "table">("graph");
   const [range, setRange] = useState(14);
+  const [scenarioDate, setScenarioDate] = useState("");
+  const [impliedVolatilityOverrides, setImpliedVolatilityOverrides] = useState<Record<string, number>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState<StrategyTemplateId | "custom">(DEFAULT_STRATEGY_TEMPLATE_ID);
   const templateChainSymbol = useRef<string | null>(null);
   const activeLeg = legs.find((item) => item.id === activeLegId) ?? legs[0] ?? initialLeg;
@@ -90,7 +93,7 @@ function App() {
         setMode(health.mode);
         setLegs((current) => current.map((item) => {
           const existingContract = findContract(nextChain, item);
-          const contract = existingContract ?? chooseDefaultContract(nextChain, item.type);
+          const contract = existingContract ?? chooseDefaultContract(nextChain, item.type, item.expiry, underlying?.selected_price ?? item.strike);
           const preserveInvalidTemplateLeg = current.length > 1
             && selectedTemplateId !== "custom"
             && chain?.underlying_symbol === requestedSymbol
@@ -156,6 +159,14 @@ function App() {
 
   const selectedExpiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry);
   const strikeContracts = selectedExpiry?.contracts.filter((contract) => contract.option_type === activeLeg.type && contract.active) ?? [];
+  const scenarioMinimumDate = contextDate(chain);
+  const scenarioMaximumDate = selectedExpiry?.expiration_date ?? scenarioMinimumDate;
+  const activeContract = findContract(chain, activeLeg);
+  const activeOptionQuote = activeContract && optionResponse ? findQuote(optionResponse, activeContract.symbol) : null;
+  const observedImpliedVolatility = activeOptionQuote?.greeks?.implied_volatility ?? null;
+  const scenarioImpliedVolatility = activeContract
+    ? impliedVolatilityOverrides[activeContract.symbol] ?? observedImpliedVolatility
+    : null;
   const legContractKey = legs.map((item) => `${item.id}:${item.expiry}:${item.strike}:${item.type}`).join("|");
   const selectedContracts = useMemo(
     () => legs
@@ -215,6 +226,11 @@ function App() {
   const cashFlowLabel = allLegsPriced
     ? (summary.netCashFlow > 0 ? "Net debit" : summary.netCashFlow < 0 ? "Net credit" : "Net cash flow")
     : "Net cash flow";
+
+  useEffect(() => {
+    if (!scenarioMinimumDate || !scenarioMaximumDate) return;
+    setScenarioDate((current) => clampScenarioDate(current || scenarioMinimumDate, scenarioMinimumDate, scenarioMaximumDate));
+  }, [scenarioMinimumDate, scenarioMaximumDate]);
 
   function updateActiveLeg(update: Partial<Leg>) {
     const nextLeg = { ...activeLeg, ...update };
@@ -423,6 +439,74 @@ function App() {
           <div className="strike-context"><span>{strikeContracts.length ? `${strikeContracts.length} available strikes` : "—"}</span><span className="spot-marker">{symbol} {spot != null ? spot.toFixed(2) : "—"}</span></div>
         </section>
 
+        <section className="scenario-section" aria-label="Scenario controls">
+          <div className="scenario-heading">
+            <div><span className="section-label">Scenario inputs</span><strong>Recorded assumptions</strong></div>
+            <span className="scenario-status">Not applied to expiration model</span>
+          </div>
+          <div className="scenario-controls">
+            <label className="scenario-field">
+              <span>Scenario date</span>
+              <input
+                type="date"
+                value={scenarioDate}
+                min={scenarioMinimumDate}
+                max={scenarioMaximumDate}
+                onInput={(event) => {
+                  if (event.currentTarget.value) {
+                    setScenarioDate(clampScenarioDate(event.currentTarget.value, scenarioMinimumDate, scenarioMaximumDate));
+                  }
+                }}
+                onBlur={(event) => {
+                  if (event.currentTarget.value) {
+                    setScenarioDate(clampScenarioDate(event.currentTarget.value, scenarioMinimumDate, scenarioMaximumDate));
+                  }
+                }}
+                disabled={!scenarioMinimumDate || !scenarioMaximumDate}
+              />
+            </label>
+            <label className="scenario-field volatility-field">
+              <span>Active leg IV</span>
+              <div className="volatility-input">
+                <input
+                  type="number"
+                  min="0.1"
+                  max="500"
+                  step="0.1"
+                  value={scenarioImpliedVolatility == null ? "" : (scenarioImpliedVolatility * 100).toFixed(1)}
+                  onChange={(event) => {
+                    if (!activeContract) return;
+                    const parsed = parseVolatilityPercent(event.target.value);
+                    setImpliedVolatilityOverrides((current) => {
+                      const next = { ...current };
+                      if (parsed == null) delete next[activeContract.symbol];
+                      else next[activeContract.symbol] = parsed;
+                      return next;
+                    });
+                  }}
+                  placeholder="—"
+                  aria-label="Active leg implied volatility percentage"
+                  disabled={!activeContract}
+                />
+                <span>%</span>
+              </div>
+              <small>
+                {impliedVolatilityOverrides[activeContract?.symbol ?? ""] != null
+                  ? `Override ${formatVolatilityPercent(scenarioImpliedVolatility)}`
+                  : `Observed ${formatVolatilityPercent(observedImpliedVolatility)}`}
+              </small>
+            </label>
+            {activeContract && impliedVolatilityOverrides[activeContract.symbol] != null && (
+              <button className="button subtle scenario-reset" onClick={() => setImpliedVolatilityOverrides((current) => {
+                const next = { ...current };
+                delete next[activeContract.symbol];
+                return next;
+              })}>Use observed IV</button>
+            )}
+          </div>
+          <p className="scenario-note">The current payoff remains aggregate intrinsic value at expiration. Date and IV are recorded for the future pre-expiry model and do not change this output.</p>
+        </section>
+
         <section className="position-summary" aria-label="Position summary details">
           <div><span className="section-label">Position summary</span><strong>{summary.legCount} leg{summary.legCount === 1 ? "" : "s"}</strong></div>
           <div><span className="section-label">{cashFlowLabel}</span><strong>{allLegsPriced ? money.format(Math.abs(summary.netCashFlow)) : "—"}</strong></div>
@@ -479,9 +563,16 @@ function App() {
   );
 }
 
-function chooseDefaultContract(chain: OptionChainResponse, optionType: "call" | "put"): OptionContract | undefined {
+function chooseDefaultContract(chain: OptionChainResponse, optionType: "call" | "put", preferredExpiry?: string, anchorStrike?: number): OptionContract | undefined {
   const contracts = chain.expirations.flatMap((expiration) => expiration.contracts).filter((contract) => contract.active);
-  return contracts.find((contract) => contract.option_type === optionType && contract.expiration_date === "2026-09-18" && contract.strike === 14) ?? contracts.find((contract) => contract.option_type === optionType) ?? contracts[0];
+  const preferred = contracts.filter((contract) => contract.option_type === optionType && contract.expiration_date === preferredExpiry);
+  const nearest = (candidates: OptionContract[]) => candidates
+    .slice()
+    .sort((left, right) => Math.abs(left.strike - (anchorStrike ?? 14)) - Math.abs(right.strike - (anchorStrike ?? 14)))[0];
+  return nearest(preferred)
+    ?? contracts.find((contract) => contract.option_type === optionType && contract.expiration_date === "2026-09-18" && contract.strike === 14)
+    ?? nearest(contracts.filter((contract) => contract.option_type === optionType))
+    ?? contracts[0];
 }
 
 function findContract(chain: OptionChainResponse | null, leg: Leg): OptionContract | undefined {
@@ -522,6 +613,10 @@ function calculateBreakeven(leg: Leg): number {
 
 function formatExpiry(value: string): string {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "2-digit" }).format(new Date(`${value}T00:00:00Z`));
+}
+
+function contextDate(context: { observed_at?: string } | null): string {
+  return context?.observed_at?.slice(0, 10) ?? "";
 }
 
 function formatStrike(value: number): string {
@@ -666,7 +761,7 @@ function PayoffGraph({ profile, spot, breakeven }: { profile: GraphPoint[]; spot
 
 function PayoffTable({ profile }: { profile: { price: number; pnl: number }[] }) {
   const sample = profile.filter((_, index) => index % 2 === 0);
-  return <div className="payoff-table"><div className="table-head"><span>Underlying</span><span>Now</span><span>+7 days</span><span>+14 days</span><span>At expiry</span></div>{sample.map((point) => <div className="table-row" key={point.price}><span>${point.price.toFixed(2)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl * .84)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl * .92)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl)}</span></div>)}</div>;
+  return <div className="payoff-table"><div className="table-head"><span>Underlying</span><span>At expiration</span></div>{sample.map((point) => <div className="table-row" key={point.price}><span>${point.price.toFixed(2)}</span><span className={point.pnl >= 0 ? "profit-text" : "loss-text"}>{money.format(point.pnl)}</span></div>)}</div>;
 }
 
 export default App;

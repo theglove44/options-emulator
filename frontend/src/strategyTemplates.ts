@@ -56,6 +56,14 @@ export const STRATEGY_TEMPLATES = {
       { side: "buy", type: "put", strikeRole: "lower" }
     ]
   },
+  "vertical-spread": {
+    id: "vertical-spread",
+    label: "Vertical Spread",
+    legs: [
+      { side: "buy", type: "call", strikeRole: "anchor" },
+      { side: "sell", type: "call", strikeRole: "upper" }
+    ]
+  },
   straddle: {
     id: "straddle",
     label: "Long Straddle",

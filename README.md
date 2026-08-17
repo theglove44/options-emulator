@@ -74,8 +74,8 @@ delayed/stale state come from the backend. The pricing selector applies one
 explicit mode to the underlying and every option leg. The expiration payoff
 remains a clearly labelled local modelled scenario. The current single-leg
 builder forms and canonical multi-leg forms—Call Credit Spread, Put Credit
-Spread, Long Straddle, Long Strangle, Short Strangle, Iron Condor, Calendar
-Spread, and Diagonal Spread—
+Spread, Vertical Spread, Long Straddle, Long Strangle, Short Strangle, Iron
+Condor, Calendar Spread, and Diagonal Spread—
 are represented by an explicit strategy template registry, with Long Call as the
 default. Selecting a template resolves its named legs against the loaded chain;
 the existing multi-leg seam still allows those legs to be selected, edited, and
@@ -85,7 +85,9 @@ is unpriced or expiries are not aligned; multi-expiry and pre-expiry modelling
 remain later work. The payoff panel supports graph and table display modes, a
 zoomable signed profit/loss graph with breakeven markers, and a hover readout
 for underlying price and modelled P&L. Each active leg also has an explicit
-contract-backed strike picker rather than a continuous slider.
+contract-backed strike picker rather than a continuous slider. Scenario date
+and active-leg implied-volatility controls record explicit assumptions, but do
+not change the current expiration-only model.
 
 ## Verification
 
@@ -107,13 +109,14 @@ account APIs are included.
 
 The current Milestone 2 builder slice is also implemented in fixture mode: the
 strategy registry covers the existing single-leg forms plus Call Credit Spread,
-Put Credit Spread, Long Straddle, Long Strangle, Short Strangle, Iron Condor,
-Calendar Spread, and Diagonal Spread; explicit multi-leg editing,
-user-selectable bid/ask/midpoint pricing, aggregate cash-flow and expiration
-payoff summaries, and the signed, zoomable graph/table display are verified in
-the current builder.
+Put Credit Spread, Vertical Spread, Long Straddle, Long Strangle, Short
+Strangle, Iron Condor, Calendar Spread, and Diagonal Spread; explicit
+multi-leg editing, user-selectable bid/ask/midpoint pricing, aggregate
+cash-flow and expiration payoff summaries, recorded scenario assumptions, and
+the signed, zoomable graph/table display are verified in the current builder.
 Remaining builder work is listed in [docs/BACKLOG.md](docs/BACKLOG.md),
-including pre-expiry modelling and saved strategies.
+including pre-expiry modelling and saved strategies. The table view remains
+expiration-only until a pre-expiry pricing model is implemented.
 
 The existing authenticated live smoke-test record is in
 [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); this checkout did not have the private

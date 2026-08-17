@@ -35,6 +35,7 @@ describe("strategy template registry", () => {
       "short-put",
       "call-credit-spread",
       "put-credit-spread",
+      "vertical-spread",
       "straddle",
       "strangle",
       "short-strangle",
@@ -60,6 +61,10 @@ describe("strategy template registry", () => {
     expect(STRATEGY_TEMPLATES["put-credit-spread"].legs).toEqual([
       { side: "sell", type: "put", strikeRole: "anchor" },
       { side: "buy", type: "put", strikeRole: "lower" }
+    ]);
+    expect(STRATEGY_TEMPLATES["vertical-spread"].legs).toEqual([
+      { side: "buy", type: "call", strikeRole: "anchor" },
+      { side: "sell", type: "call", strikeRole: "upper" }
     ]);
     expect(STRATEGY_TEMPLATES.straddle.legs).toHaveLength(2);
     expect(STRATEGY_TEMPLATES.strangle.legs).toEqual([
@@ -102,6 +107,7 @@ describe("strategy template registry", () => {
       "16call"
     ]);
     expect(resolveStrategyTemplateContracts({ ...expiry, contracts: expiry.contracts.filter((contract) => contract.strike <= 14) }, STRATEGY_TEMPLATES["call-credit-spread"], 14.18)).toBeNull();
+    expect(resolveStrategyTemplateContracts({ ...expiry, contracts: expiry.contracts.filter((contract) => contract.strike <= 14) }, STRATEGY_TEMPLATES["vertical-spread"], 14.18)).toBeNull();
   });
 
   it("resolves near and far expiries for calendar and diagonal spreads", () => {

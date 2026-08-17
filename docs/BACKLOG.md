@@ -14,14 +14,14 @@
 
 - [x] Add strategy template registry for the existing Long/Short Call and Put single-leg shell.
 - [x] Add explicit multi-leg editing and aggregate position summary seam to the current builder.
-- [x] Add canonical Call Credit Spread, Put Credit Spread, Long Straddle, Long Strangle, Short Strangle, Iron Condor, Calendar Spread, and Diagonal Spread templates to the current builder.
+- [x] Add canonical Call Credit Spread, Put Credit Spread, Vertical Spread, Long Straddle, Long Strangle, Short Strangle, Iron Condor, Calendar Spread, and Diagonal Spread templates to the current builder.
 - [x] Add an explicit contract-backed strike picker for each active leg.
 - [x] Add graph/table display switch, zoom controls, signed profit/loss segments, breakeven markers, and hover readout.
+- [x] Add scenario date and active-leg implied-volatility controls as recorded assumptions; keep the current output expiration-only.
 
 ## Next
 
 - [x] Add bid/ask versus midpoint pricing mode.
-- [ ] Add scenario date and implied-volatility controls.
 - [ ] Add local saved strategies.
 
 ## Later

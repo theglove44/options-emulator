@@ -12,6 +12,7 @@ import math
 import os
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
@@ -296,6 +297,37 @@ FIXTURE_STRIKES = (12.0, 13.0, 14.0, 15.0, 16.0, 17.0)
 FIXTURE_SPOT = 14.18
 
 
+@dataclass(frozen=True)
+class FixtureProfile:
+    spot: float
+    strikes: tuple[float, ...]
+
+
+FIXTURE_PROFILES = {
+    "ETHA": FixtureProfile(FIXTURE_SPOT, FIXTURE_STRIKES),
+    "AAPL": FixtureProfile(225.40, (215.0, 220.0, 225.0, 230.0, 235.0, 240.0)),
+    "SPY": FixtureProfile(600.25, (590.0, 595.0, 600.0, 605.0, 610.0, 615.0)),
+    "IWM": FixtureProfile(215.75, (205.0, 210.0, 215.0, 220.0, 225.0, 230.0)),
+}
+
+
+def _fixture_profile(underlying: str) -> FixtureProfile:
+    normalized = underlying.strip().upper()
+    profile = FIXTURE_PROFILES.get(normalized)
+    if profile is not None:
+        return profile
+
+    # Unknown symbols remain usable in fixture mode without pretending they
+    # are observed broker data. The profile is stable for a given symbol so a
+    # symbol edit visibly changes the chain and quote context.
+    seed = sum((index + 1) * ord(character) for index, character in enumerate(normalized))
+    step = 1.0 if seed % 3 == 0 else 5.0
+    spot = float((seed % 480) + 20)
+    centre = round(spot / step) * step
+    strikes = tuple(round(centre + step * offset, 2) for offset in (-2, -1, 0, 1, 2, 3))
+    return FixtureProfile(round(spot, 2), strikes)
+
+
 def _fixture_option_symbol(
     underlying: str, expiry: date, option_type: str, strike: float
 ) -> tuple[str, str]:
@@ -333,10 +365,11 @@ class FixtureMarketDataAdapter:
 
     async def get_chain(self, symbol: str) -> OptionChainResponse:
         underlying = symbol.strip().upper()
+        profile = _fixture_profile(underlying)
         expirations: list[ChainExpiration] = []
         for expiry, days in FIXTURE_EXPIRATIONS:
             contracts: list[OptionContract] = []
-            for strike in FIXTURE_STRIKES:
+            for strike in profile.strikes:
                 for option_type in ("call", "put"):
                     occ, streamer = _fixture_option_symbol(underlying, expiry, option_type, strike)
                     contracts.append(
@@ -376,10 +409,11 @@ class FixtureMarketDataAdapter:
             symbol = requested_symbol.strip().upper()
             metadata = _parse_option_symbol(symbol)
             if metadata:
+                profile = _fixture_profile(metadata["underlying_symbol"])
                 intrinsic = (
-                    max(FIXTURE_SPOT - metadata["strike"], 0)
+                    max(profile.spot - metadata["strike"], 0)
                     if metadata["option_type"] == "call"
-                    else max(metadata["strike"] - FIXTURE_SPOT, 0)
+                    else max(metadata["strike"] - profile.spot, 0)
                 )
                 premium = intrinsic + (0.90 if metadata["option_type"] == "call" else 0.80)
                 bid, ask, last = (
@@ -420,7 +454,10 @@ class FixtureMarketDataAdapter:
                     observed_at=now,
                 )
             else:
-                bid, ask, last = 14.13, 14.23, FIXTURE_SPOT
+                profile = _fixture_profile(symbol)
+                bid = round(profile.spot - 0.05, 2)
+                ask = round(profile.spot + 0.05, 2)
+                last = profile.spot
                 item = QuoteSnapshot(
                     symbol=symbol,
                     streamer_symbol=symbol,
