@@ -18,6 +18,7 @@
 - [x] Add an explicit contract-backed strike picker for each active leg.
 - [x] Add graph/table display switch, zoom controls, signed profit/loss segments, breakeven markers, and hover readout.
 - [x] Add scenario date and active-leg implied-volatility controls as recorded assumptions; keep the current output expiration-only.
+- [x] Add signed, quantity-weighted aggregate observed Greeks with source timestamp and explicit observed-versus-modelled labelling; keep future-date Greeks out of scope.
 
 ## Next
 
