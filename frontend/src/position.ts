@@ -1,3 +1,4 @@
+import { calculateOptionPrice } from "./scenario";
 import type { Leg, ProfilePoint } from "./types";
 
 export type PositionSummary = {
@@ -102,5 +103,47 @@ export function buildPositionProfile(legs: readonly Leg[], spot: number, rangePe
       return total + (intrinsic - leg.price) * leg.quantity * leg.multiplier * direction;
     }, 0);
     return { price, pnl };
+  });
+}
+
+export type PreExpiryLegInput = {
+  leg: Leg;
+  volatility: number | null;
+};
+
+export function calculatePreExpiryPnl(
+  inputs: readonly PreExpiryLegInput[],
+  underlyingPrice: number,
+  scenarioDate: string
+): number | null {
+  if (!inputs.length) return null;
+  let total = 0;
+  for (const input of inputs) {
+    if (!input.leg.priceLoaded || input.volatility == null) return null;
+    const value = calculateOptionPrice(input.leg, underlyingPrice, input.volatility, scenarioDate);
+    if (value == null) return null;
+    const direction = input.leg.side === "buy" ? 1 : -1;
+    total += (value - input.leg.price) * input.leg.quantity * input.leg.multiplier * direction;
+  }
+  return total;
+}
+
+export function buildPreExpiryProfile(
+  inputs: readonly PreExpiryLegInput[],
+  spot: number,
+  scenarioDate: string,
+  rangePercent = 0.14
+): ProfilePoint[] {
+  if (spot <= 0 || !inputs.length) return [];
+  const low = spot * (1 - rangePercent);
+  const high = spot * (1 + rangePercent);
+  const sampledPrices = Array.from({ length: 33 }, (_, index) => low + ((high - low) * index) / 32);
+  const prices = [...new Set([
+    ...sampledPrices,
+    ...inputs.map(({ leg }) => leg.strike).filter((strike) => strike >= low && strike <= high)
+  ])].sort((left, right) => left - right);
+  return prices.flatMap((price) => {
+    const pnl = calculatePreExpiryPnl(inputs, price, scenarioDate);
+    return pnl == null ? [] : [{ price, pnl }];
   });
 }

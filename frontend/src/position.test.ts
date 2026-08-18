@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionProfile, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
+import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
 import type { Leg } from "./types";
 
 const longCall: Leg = {
@@ -174,5 +174,17 @@ describe("position editing seam", () => {
 
     expect(summarizePosition(legs).netCredit).toBeCloseTo(60);
     expect(buildPositionProfile(legs, 14).find((point) => point.price === 14)?.pnl).toBeCloseTo(60);
+  });
+
+  it("models pre-expiry value from per-leg IV and scenario date", () => {
+    const pnl = calculatePreExpiryPnl([{ leg: longCall, volatility: 0.45 }], 14, "2026-08-18");
+    expect(pnl).toBeGreaterThan(-90);
+    expect(pnl).toBeLessThan(100);
+    expect(buildPreExpiryProfile([{ leg: longCall, volatility: 0.45 }], 14, "2026-08-18")).toHaveLength(33);
+  });
+
+  it("withholds pre-expiry output when a leg IV is missing", () => {
+    expect(calculatePreExpiryPnl([{ leg: longCall, volatility: null }], 14, "2026-08-18")).toBeNull();
+    expect(buildPreExpiryProfile([{ leg: longCall, volatility: null }], 14, "2026-08-18")).toEqual([]);
   });
 });

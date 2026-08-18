@@ -100,6 +100,8 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .greek-metric span { color: #8794b8; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; }
 .greek-metric strong { color: #f2f5ff; font-size: 19px; }
 .greeks-note { margin: 12px 0 0; color: #7180a2; font-size: 11px; line-height: 1.5; }
+.scenario-model-panel { margin: 0 0 18px; padding: 16px 18px 14px; border: 1px solid #315579; background: #0d1938; }
+.scenario-model-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 15px; background: #263c62; border: 1px solid #263c62; }
 .position-summary { display: flex; align-items: center; gap: 30px; margin: 18px 0 0; padding: 13px 18px; border: 1px solid #26345c; background: #0d1434; }
 .position-summary > div { display: flex; flex-direction: column; gap: 5px; }
 .position-summary strong { font-size: 14px; }

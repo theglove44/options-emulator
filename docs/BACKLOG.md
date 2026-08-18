@@ -25,10 +25,11 @@
 - [x] Add bid/ask versus midpoint pricing mode.
 - [x] Add local saved strategies using browser-local versioned JSON, with
   provenance, assumptions, list/load, and delete controls.
+- [x] Add a fixture-first pre-expiry model using scenario date, per-leg IV,
+  recorded entry prices, and explicit modelled-output labelling.
 
 ## Later
 
-- [ ] Pre-expiry pricing model with per-leg IV.
 - [ ] Net and future Greeks.
 - [ ] Commissions and custom prices.
 - [ ] Market events and liquidity overlays.

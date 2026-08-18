@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchChain, fetchHealth, fetchQuotes, fetchSymbolSearch } from "./api";
 import type { ChainExpiration, OptionChainResponse, OptionContract, PricingMode, QuoteResponse, QuoteSnapshot, SymbolResult } from "./api";
 import { initialLeg } from "./mockData";
-import { buildPositionProfile, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
+import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
 import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
 import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
 import { clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent } from "./scenario";
@@ -238,6 +238,26 @@ function App() {
       greeks: quote?.greeks ?? null
     };
   })), [chain, legs, optionResponse]);
+  const preExpiryInputs = useMemo(() => legs.map((leg) => {
+    const contract = findContract(chain, leg);
+    const quote = contract && optionResponse ? findQuote(optionResponse, contract.symbol) : null;
+    return {
+      leg,
+      volatility: contract ? impliedVolatilityOverrides[contract.symbol] ?? quote?.greeks?.implied_volatility ?? null : null
+    };
+  }), [chain, impliedVolatilityOverrides, legs, optionResponse]);
+  const preExpiryProfile = useMemo(
+    () => (spotValue > 0 && scenarioDate && !hasMixedExpiries
+      ? buildPreExpiryProfile(preExpiryInputs, spotValue, scenarioDate, range / 100)
+      : []),
+    [hasMixedExpiries, preExpiryInputs, range, scenarioDate, spotValue]
+  );
+  const preExpiryPnl = useMemo(
+    () => (spotValue > 0 && scenarioDate && !hasMixedExpiries
+      ? calculatePreExpiryPnl(preExpiryInputs, spotValue, scenarioDate)
+      : null),
+    [hasMixedExpiries, preExpiryInputs, scenarioDate, spotValue]
+  );
   const breakeven = legs.length === 1 && activeLeg.priceLoaded ? calculateBreakeven(activeLeg) : null;
   const strategyName = strategyTemplate?.label ?? "Custom position";
   const breakevenChange = breakeven != null && spotValue > 0 ? ((breakeven / spotValue - 1) * 100).toFixed(1) : "0.0";
@@ -563,7 +583,7 @@ function App() {
         <section className="scenario-section" aria-label="Scenario controls">
           <div className="scenario-heading">
             <div><span className="section-label">Scenario inputs</span><strong>Recorded assumptions</strong></div>
-            <span className="scenario-status">Not applied to expiration model</span>
+            <span className="scenario-status">Applied to pre-expiry model</span>
           </div>
           <div className="scenario-controls">
             <label className="scenario-field">
@@ -625,7 +645,7 @@ function App() {
               })}>Use observed IV</button>
             )}
           </div>
-          <p className="scenario-note">The current payoff remains aggregate intrinsic value at expiration. Date and IV are recorded for the future pre-expiry model and do not change this output.</p>
+          <p className="scenario-note">Observed quotes and Greeks remain unchanged. These assumptions drive the separate modelled pre-expiry value below.</p>
         </section>
 
         <section className="position-summary" aria-label="Position summary details">
@@ -658,6 +678,19 @@ function App() {
             <GreekMetric label="Rho" value={observedGreeks.rho} />
           </div>
           <p className="greeks-note">Observed contract Greeks are signed by side and weighted by quantity × contract multiplier. They do not alter the modelled expiration payoff.</p>
+        </section>
+
+        <section className="scenario-model-panel" aria-label="Modelled pre-expiry scenario">
+          <div className="greeks-heading">
+            <div><span className="section-label">Modelled scenario</span><strong>Pre-expiry value at spot</strong></div>
+            <span className="greeks-status">{scenarioDate || "No scenario date"} · 5.0% risk-free assumption</span>
+          </div>
+          <div className="scenario-model-grid">
+            <Metric label="Modelled P&amp;L" value={preExpiryPnl == null ? "—" : money.format(preExpiryPnl)} tone={preExpiryPnl != null && preExpiryPnl >= 0 ? "profit" : "loss"} />
+            <Metric label="Scenario date" value={scenarioDate || "—"} tone="neutral" />
+            <Metric label="Model range" value={preExpiryProfile.length ? `${preExpiryProfile.length} points` : "—"} tone="neutral" />
+          </div>
+          <p className="greeks-note">Black–Scholes-style option values use the recorded entry price, scenario date, each leg's observed or overridden IV, and the fixed educational rate assumption. This is modelled output, not an observed quote or future-date Greek.</p>
         </section>
 
         <section className="chart-panel">
@@ -698,7 +731,7 @@ function App() {
           })}
           <button className="button subtle add-leg" onClick={addLeg}>+ Add leg</button>
         </section>
-        <div className="data-context">Observed market data: {context?.source ?? mode}, {freshness}, observed {observedAt}, pricing mode {formatPricingMode(observedPricingMode)}. Modelled scenario: aggregate expiration intrinsic value using each recorded entry price when all leg expiries are aligned; no pre-expiry valuation.</div>
+        <div className="data-context">Observed market data: {context?.source ?? mode}, {freshness}, observed {observedAt}, pricing mode {formatPricingMode(observedPricingMode)}. Modelled scenario: pre-expiry value uses scenario date and per-leg IV; expiration chart remains intrinsic value.</div>
           </div>
         )}
       </section>
