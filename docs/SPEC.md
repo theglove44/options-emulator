@@ -49,6 +49,11 @@ Scenario date and implied-volatility controls are recorded separately from
 observed quotes in the current builder, but do not alter the expiration-only
 payoff until the later pre-expiry pricing model is deliberately implemented.
 
+Local saved strategies use browser-local versioned JSON. A saved snapshot
+contains the explicit legs, pricing mode, observed-data provenance and recorded
+scenario assumptions; loading refreshes the read-only market-data context and
+does not perform an account or order operation.
+
 ## Milestone 3: analysis tools
 
 - Volatility and price sliders.

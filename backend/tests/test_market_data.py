@@ -21,6 +21,11 @@ class MarketDataTests(unittest.TestCase):
         self.assertEqual(chain.source, "fixture")
         self.assertEqual(chain.underlying_symbol, "ETHA")
         self.assertEqual(len(chain.expirations), 6)
+        september_expiry = date(2026, 9, 18)
+        self.assertEqual(
+            chain.expirations[2].days_to_expiration,
+            max((september_expiry - chain.observed_at.date()).days, 0),
+        )
         self.assertEqual(
             {contract.option_type for contract in chain.expirations[0].contracts},
             {"call", "put"},
@@ -36,15 +41,17 @@ class MarketDataTests(unittest.TestCase):
     def test_fixture_symbol_changes_have_distinct_chain_and_underlying_context(self) -> None:
         etha_chain = asyncio.run(self.adapter.get_chain("ETHA"))
         aapl_chain = asyncio.run(self.adapter.get_chain("AAPL"))
-        aapl_quote = asyncio.run(self.adapter.get_quotes(["AAPL"], PricingMode.MIDPOINT)).items[0]
+        aapl_quotes = asyncio.run(self.adapter.get_quotes(["AAPL"], PricingMode.MIDPOINT))
+        aapl_quote = aapl_quotes.items[0]
 
         self.assertNotEqual(
             etha_chain.expirations[0].contracts[0].strike,
             aapl_chain.expirations[0].contracts[0].strike,
         )
-        self.assertAlmostEqual(aapl_quote.selected_price, 225.4)
+        self.assertAlmostEqual(aapl_quote.selected_price, 303.6)
+        self.assertAlmostEqual(aapl_quotes.spot_price, 303.6)
         self.assertIn(
-            225.0,
+            300.0,
             [contract.strike for contract in aapl_chain.expirations[0].contracts],
         )
 
@@ -58,6 +65,23 @@ class MarketDataTests(unittest.TestCase):
         self.assertEqual(quote.strike, 14.0)
         self.assertIsNotNone(quote.greeks)
         self.assertEqual(quote.greeks.delta, 0.56)
+
+    def test_fixture_option_delta_changes_with_strike(self) -> None:
+        symbols = [
+            "AAPL  260918C00290000",
+            "AAPL  260918C00315000",
+            "AAPL  260918P00315000",
+        ]
+        quotes = asyncio.run(self.adapter.get_quotes(symbols, PricingMode.MIDPOINT))
+        deltas = {
+            (quote.option_type, quote.strike): quote.greeks.delta
+            for quote in quotes.items
+            if quote.greeks
+        }
+
+        self.assertAlmostEqual(deltas[("call", 290.0)], 0.86)
+        self.assertAlmostEqual(deltas[("call", 315.0)], 0.31)
+        self.assertAlmostEqual(deltas[("put", 315.0)], -0.69)
 
     def test_live_adapter_fails_closed_without_credentials(self) -> None:
         adapter = TastytradeMarketDataAdapter(None, None)

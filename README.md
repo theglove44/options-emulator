@@ -56,8 +56,12 @@ The market-data endpoints are:
 - `GET /api/greeks?symbols=<option-symbol>`
 
 Quotes retain the source, observed timestamp, delayed/stale flags, bid, ask,
-midpoint, last, selected pricing mode, and available Greeks. Fixture mode uses
-the same response shapes without making a broker request.
+midpoint, last, selected pricing mode, and available Greeks. The quote response
+also exposes `spot_price` as the normalised equity last price (falling back to
+the selected equity price when last is unavailable), so the builder does not
+infer spot from an option quote. Fixture mode uses the same response shapes
+without making a broker request; its AAPL reference is 303.60 and remains
+labelled fixture/observed in the UI.
 
 ### Frontend
 
@@ -89,6 +93,13 @@ contract-backed strike picker rather than a continuous slider. Scenario date
 and active-leg implied-volatility controls record explicit assumptions, but do
 not change the current expiration-only model.
 
+Strategies can be saved locally from the builder. The Saved trades view stores
+versioned JSON in this browser's `localStorage`, including the legs, selected
+pricing mode, observed source/timestamp and delayed/stale state, plus the
+recorded scenario date and IV overrides. Loading refreshes the read-only market
+data context for the saved symbol; deleting removes only that local browser
+record. Saved strategies do not contain credentials or create orders.
+
 ## Verification
 
 ```bash
@@ -114,9 +125,10 @@ Strangle, Iron Condor, Calendar Spread, and Diagonal Spread; explicit
 multi-leg editing, user-selectable bid/ask/midpoint pricing, aggregate
 cash-flow and expiration payoff summaries, recorded scenario assumptions, and
 the signed, zoomable graph/table display are verified in the current builder.
-Remaining builder work is listed in [docs/BACKLOG.md](docs/BACKLOG.md),
-including pre-expiry modelling and saved strategies. The table view remains
-expiration-only until a pre-expiry pricing model is implemented.
+Local saved strategies are also verified in fixture mode with browser-local JSON
+persistence and explicit load/delete controls. Remaining builder work is listed
+in [docs/BACKLOG.md](docs/BACKLOG.md), including pre-expiry modelling. The table
+view remains expiration-only until a pre-expiry pricing model is implemented.
 
 The existing authenticated live smoke-test record is in
 [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); this checkout did not have the private

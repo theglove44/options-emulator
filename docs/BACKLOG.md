@@ -22,7 +22,8 @@
 ## Next
 
 - [x] Add bid/ask versus midpoint pricing mode.
-- [ ] Add local saved strategies.
+- [x] Add local saved strategies using browser-local versioned JSON, with
+  provenance, assumptions, list/load, and delete controls.
 
 ## Later
 

@@ -21,7 +21,7 @@ normalised chain / quote / Greeks contract
 localhost API <--> React builder UI
         |
         v
-local saved strategies (JSON or SQLite)
+browser-local saved strategies (versioned JSON in localStorage)
 ```
 
 ## Backend boundaries
@@ -37,6 +37,12 @@ Each quote should retain:
 - bid, ask, mark, last, and the selected pricing source;
 - IV, volume, open interest, and Greeks where available;
 - observed timestamp and delayed/stale status.
+
+The `/api/quotes` response also exposes `spot_price` separately from its item
+list. It is sourced from the requested equity quote's last price, with the
+selected equity price as a fallback, and is used by the builder for the spot
+marker and chain strike context. Option Greeks, including delta, remain on the
+normalised option quote items.
 
 The current HTTP contract exposes this as `/api/symbols/search`,
 `/api/expirations/{symbol}`, `/api/chains/{symbol}`, `/api/quotes`, and
@@ -62,6 +68,12 @@ A position is a list of explicit legs. An option leg contains side, quantity, co
 The frontend owns interaction state and visualisation only. It should not know how tastytrade authentication works and should not calculate a different result from the backend for the same scenario request.
 
 Fixture mode is a first-class mode, not a temporary hack. It allows UI and domain verification when markets are closed, credentials are unavailable, or a reproducible test case is needed.
+
+Saved strategies are a browser-local JSON snapshot of the current position and
+recorded assumptions. Each snapshot retains observed market-data provenance,
+including source, timestamp, pricing mode and delayed/stale state. The browser
+does not receive broker credentials, and loading or deleting a snapshot does not
+call an account or order endpoint.
 
 ## Safety boundary
 

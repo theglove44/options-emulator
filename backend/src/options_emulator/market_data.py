@@ -116,6 +116,7 @@ class QuoteSnapshot(BaseModel):
 
 class QuoteResponse(DataContext):
     items: list[QuoteSnapshot]
+    spot_price: float | None = None
 
 
 class GreeksResponse(DataContext):
@@ -234,6 +235,13 @@ def _stale(observed_at: datetime) -> bool:
     return utc_now() - observed_at > timedelta(minutes=5)
 
 
+def _spot_price(items: Sequence[QuoteSnapshot]) -> float | None:
+    for item in items:
+        if item.instrument_type == "equity":
+            return item.last if item.last is not None else item.selected_price
+    return None
+
+
 def _event_datetime(value: Any) -> datetime:
     milliseconds = _as_float(value)
     if milliseconds is None or milliseconds <= 0:
@@ -286,12 +294,12 @@ def _quote_snapshot_from_market_data(
 
 
 FIXTURE_EXPIRATIONS = (
-    (date(2026, 8, 21), 6),
-    (date(2026, 8, 28), 13),
-    (date(2026, 9, 18), 34),
-    (date(2026, 10, 16), 62),
-    (date(2026, 12, 18), 125),
-    (date(2027, 1, 15), 153),
+    date(2026, 8, 21),
+    date(2026, 8, 28),
+    date(2026, 9, 18),
+    date(2026, 10, 16),
+    date(2026, 12, 18),
+    date(2027, 1, 15),
 )
 FIXTURE_STRIKES = (12.0, 13.0, 14.0, 15.0, 16.0, 17.0)
 FIXTURE_SPOT = 14.18
@@ -305,7 +313,9 @@ class FixtureProfile:
 
 FIXTURE_PROFILES = {
     "ETHA": FixtureProfile(FIXTURE_SPOT, FIXTURE_STRIKES),
-    "AAPL": FixtureProfile(225.40, (215.0, 220.0, 225.0, 230.0, 235.0, 240.0)),
+    # Reference fixture value supplied for the AAPL browser workflow on
+    # 2026-08-17. Live tastytrade mode remains the source for current prices.
+    "AAPL": FixtureProfile(303.60, (290.0, 295.0, 300.0, 305.0, 310.0, 315.0)),
     "SPY": FixtureProfile(600.25, (590.0, 595.0, 600.0, 605.0, 610.0, 615.0)),
     "IWM": FixtureProfile(215.75, (205.0, 210.0, 215.0, 220.0, 225.0, 230.0)),
 }
@@ -338,6 +348,12 @@ def _fixture_option_symbol(
     return occ, streamer
 
 
+def _fixture_delta(profile: FixtureProfile, strike: float, option_type: str) -> float:
+    """Return a deterministic, strike-sensitive Greek for fixture mode."""
+    call_delta = max(0.05, min(0.95, 0.56 - (strike - profile.spot) / 45))
+    return round(call_delta if option_type == "call" else call_delta - 1, 2)
+
+
 class FixtureMarketDataAdapter:
     """Deterministic market-data adapter used without broker access."""
 
@@ -366,8 +382,11 @@ class FixtureMarketDataAdapter:
     async def get_chain(self, symbol: str) -> OptionChainResponse:
         underlying = symbol.strip().upper()
         profile = _fixture_profile(underlying)
+        observed_at = utc_now()
+        observed_date = observed_at.date()
         expirations: list[ChainExpiration] = []
-        for expiry, days in FIXTURE_EXPIRATIONS:
+        for expiry in FIXTURE_EXPIRATIONS:
+            days = max((expiry - observed_date).days, 0)
             contracts: list[OptionContract] = []
             for strike in profile.strikes:
                 for option_type in ("call", "put"):
@@ -394,6 +413,7 @@ class FixtureMarketDataAdapter:
             )
         context = _context(
             self.source,
+            observed_at=observed_at,
             notes=["Deterministic fixture chain; prices are not observed market data."],
         )
         return OptionChainResponse(
@@ -445,7 +465,7 @@ class FixtureMarketDataAdapter:
                     open_interest=4820,
                     greeks=GreekSnapshot(
                         implied_volatility=0.45,
-                        delta=0.56 if metadata["option_type"] == "call" else -0.44,
+                        delta=_fixture_delta(profile, metadata["strike"], metadata["option_type"]),
                         gamma=0.12,
                         theta=-0.04,
                         rho=0.02 if metadata["option_type"] == "call" else -0.02,
@@ -478,7 +498,7 @@ class FixtureMarketDataAdapter:
             pricing_mode=pricing_mode,
             notes=["Deterministic fixture; no broker request was made."],
         )
-        return QuoteResponse(items=items, **context.model_dump())
+        return QuoteResponse(items=items, spot_price=_spot_price(items), **context.model_dump())
 
     async def get_greeks(self, symbols: Sequence[str]) -> GreeksResponse:
         quote_response = await self.get_quotes(symbols, PricingMode.MIDPOINT)
@@ -629,7 +649,7 @@ class TastytradeMarketDataAdapter:
             delayed=self.delayed,
             pricing_mode=pricing_mode,
         )
-        return QuoteResponse(items=items, **context.model_dump())
+        return QuoteResponse(items=items, spot_price=_spot_price(items), **context.model_dump())
 
     async def get_greeks(self, symbols: Sequence[str]) -> GreeksResponse:
         self._require_credentials()

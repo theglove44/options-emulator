@@ -6,6 +6,8 @@ import { buildPositionProfile, hasUnboundedProfit, summarizePosition } from "./p
 import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
 import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
 import { clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent } from "./scenario";
+import { deleteSavedStrategy, listSavedStrategies, saveStrategy } from "./savedStrategies";
+import type { SavedStrategy } from "./savedStrategies";
 import type { Leg } from "./types";
 
 const money = new Intl.NumberFormat("en-GB", {
@@ -43,6 +45,11 @@ function App() {
   const [scenarioDate, setScenarioDate] = useState("");
   const [impliedVolatilityOverrides, setImpliedVolatilityOverrides] = useState<Record<string, number>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState<StrategyTemplateId | "custom">(DEFAULT_STRATEGY_TEMPLATE_ID);
+  const [showSavedStrategies, setShowSavedStrategies] = useState(false);
+  const [savedStrategies, setSavedStrategies] = useState<SavedStrategy[]>(() => listSavedStrategies());
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [savedError, setSavedError] = useState<string | null>(null);
   const templateChainSymbol = useRef<string | null>(null);
   const activeLeg = legs.find((item) => item.id === activeLegId) ?? legs[0] ?? initialLeg;
   const currentTemplateId = legs.length === 1 ? templateForLeg(activeLeg).id : selectedTemplateId;
@@ -89,7 +96,7 @@ function App() {
         setUnderlyingResponse(quotes);
         const underlying = findQuote(quotes, requestedSymbol);
         setUnderlyingQuote(underlying);
-        setSpot(underlying?.selected_price ?? null);
+        setSpot(quotes.spot_price ?? underlying?.selected_price ?? null);
         setMode(health.mode);
         setLegs((current) => current.map((item) => {
           const existingContract = findContract(nextChain, item);
@@ -159,6 +166,7 @@ function App() {
 
   const selectedExpiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry);
   const strikeContracts = selectedExpiry?.contracts.filter((contract) => contract.option_type === activeLeg.type && contract.active) ?? [];
+  const strikeContractKey = strikeContracts.map((contract) => contract.symbol).join("|");
   const scenarioMinimumDate = contextDate(chain);
   const scenarioMaximumDate = selectedExpiry?.expiration_date ?? scenarioMinimumDate;
   const activeContract = findContract(chain, activeLeg);
@@ -178,12 +186,17 @@ function App() {
     const contract = findContract(chain, item);
     return `${item.id}:${item.side}:${contract?.symbol ?? `${item.expiry}:${item.strike}:${item.type}`}`;
   }).join("|");
+  const quoteContracts = useMemo(
+    () => [...new Map([...selectedContracts, ...strikeContracts].map((contract) => [contract.symbol, contract])).values()],
+    [selectedContracts, strikeContractKey]
+  );
+  const quoteContractKey = `${selectedContractKey}|${strikeContractKey}`;
 
   useEffect(() => {
     let cancelled = false;
     setOptionResponse(null);
-    if (!selectedContracts.length) return;
-    fetchQuotes(selectedContracts.map((contract) => contract.symbol), pricingMode)
+    if (!quoteContracts.length) return;
+    fetchQuotes(quoteContracts.map((contract) => contract.symbol), pricingMode)
       .then((quotes) => {
         if (cancelled) return;
         setOptionResponse(quotes);
@@ -199,7 +212,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [chain, pricingMode, refreshToken, selectedContractKey]);
+  }, [chain, pricingMode, refreshToken, quoteContractKey]);
 
   const spotValue = spot ?? 0;
   const expiryKeys = new Set(legs.map((item) => item.expiry).filter(Boolean));
@@ -326,13 +339,84 @@ function App() {
     setSelectedTemplateId(nextLegs.length === 1 ? templateForLeg(nextLegs[0]).id : "custom");
   }
 
+  function openSaveDialog() {
+    setSavedError(null);
+    setSaveName(`${strategyName} · ${symbol}`);
+    setSaveDialogOpen(true);
+  }
+
+  function confirmSave() {
+    const name = saveName.trim();
+    if (!name) {
+      setSavedError("Enter a name for this strategy");
+      return;
+    }
+    try {
+      const saved = saveStrategy({
+        name,
+        symbol,
+        strategyTemplateId: currentTemplateId,
+        strategyName,
+        legs,
+        provenance: {
+          source: context?.source ?? mode,
+          observedAt: context?.observed_at ?? null,
+          delayed: context?.delayed ?? false,
+          stale: context?.stale ?? false,
+          pricingMode: observedPricingMode
+        },
+        assumptions: {
+          scenarioDate,
+          impliedVolatilityOverrides
+        }
+      });
+      setSavedStrategies((current) => [saved, ...current]);
+      setSaveDialogOpen(false);
+      setSavedError(null);
+    } catch (caught) {
+      setSavedError(caught instanceof Error ? caught.message : "The strategy could not be saved locally");
+    }
+  }
+
+  function loadSavedStrategy(saved: SavedStrategy) {
+    setShowSavedStrategies(false);
+    setSaveDialogOpen(false);
+    setSavedError(null);
+    setSymbol(saved.symbol);
+    setSymbolInput(saved.symbol);
+    setPricingMode(saved.provenance.pricingMode);
+    setLegs(saved.legs.map((leg) => ({ ...leg, price: 0, priceLoaded: false })));
+    setActiveLegId(saved.legs[0]?.id ?? initialLeg.id);
+    setSelectedTemplateId(saved.strategyTemplateId);
+    setScenarioDate(saved.assumptions.scenarioDate);
+    setImpliedVolatilityOverrides({ ...saved.assumptions.impliedVolatilityOverrides });
+    setChain(null);
+    setUnderlyingResponse(null);
+    setUnderlyingQuote(null);
+    setOptionResponse(null);
+    setSpot(null);
+    setLoading(true);
+    setError(null);
+    setRefreshToken((value) => value + 1);
+  }
+
+  function removeSavedStrategy(id: string) {
+    try {
+      deleteSavedStrategy(id);
+      setSavedStrategies((current) => current.filter((strategy) => strategy.id !== id));
+      setSavedError(null);
+    } catch (caught) {
+      setSavedError(caught instanceof Error ? caught.message : "The saved strategy could not be removed");
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-mark"><span>◆</span> Option<span>Emulator</span></div>
         <nav className="main-nav" aria-label="Main navigation">
-          <button className="nav-item active">Build</button>
-          <button className="nav-item">Saved trades</button>
+          <button className={`nav-item ${showSavedStrategies ? "" : "active"}`} onClick={() => setShowSavedStrategies(false)}>Build</button>
+          <button className={`nav-item ${showSavedStrategies ? "active" : ""}`} onClick={() => setShowSavedStrategies(true)}>Saved trades{savedStrategies.length ? ` (${savedStrategies.length})` : ""}</button>
           <button className="nav-item">Optimizer</button>
           <button className="nav-item">Settings</button>
         </nav>
@@ -340,6 +424,10 @@ function App() {
       </header>
 
       <section className="workspace">
+        {showSavedStrategies ? (
+          <SavedStrategiesPanel strategies={savedStrategies} onBuild={() => setShowSavedStrategies(false)} onLoad={loadSavedStrategy} onDelete={removeSavedStrategy} />
+        ) : (
+          <div className="builder-content">
         <div className="builder-toolbar">
           <div className="strategy-heading">
             <div className="eyebrow">Strategy builder <span className="help">?</span></div>
@@ -361,9 +449,27 @@ function App() {
             </label>
             <button className="button primary" onClick={() => updateActiveLeg({ side: activeLeg.side === "buy" ? "sell" : "buy" })}>Flip side ↔</button>
             <button className="button" onClick={addLeg}>Positions ({summary.legCount}) +</button>
-            <button className="button">Save trade ▣</button>
+            <button className="button" onClick={openSaveDialog} disabled={loading || !chain || !allLegsPriced}>Save trade ▣</button>
           </div>
         </div>
+
+        {saveDialogOpen && (
+          <div className="save-dialog" role="dialog" aria-modal="true" aria-labelledby="save-dialog-title">
+            <div>
+              <span className="section-label">Local strategy</span>
+              <strong id="save-dialog-title">Save this strategy</strong>
+            </div>
+            <label className="save-name-field">
+              <span>Name</span>
+              <input value={saveName} onChange={(event) => setSaveName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") confirmSave(); }} autoFocus aria-label="Saved strategy name" />
+            </label>
+            {savedError && <p className="saved-error" role="alert">{savedError}</p>}
+            <div className="save-dialog-actions">
+              <button className="button subtle" onClick={() => setSaveDialogOpen(false)}>Cancel</button>
+              <button className="button primary" onClick={confirmSave}>Save locally</button>
+            </div>
+          </div>
+        )}
 
         <section className="quote-row">
           <label className="symbol-field">
@@ -387,7 +493,7 @@ function App() {
             </datalist>
           </label>
           <div className="spot-price">
-            {spot != null ? money.format(spot) : "—"}
+            {spot != null ? price.format(spot) : "—"}
             <span className="spot-detail">{underlyingQuote?.selected_price != null ? `${pricingModeLabel} ${price.format(underlyingQuote.selected_price)}` : "Loading quote"}</span>
           </div>
           <span className="data-badge">{mode} • {freshness}</span>
@@ -421,19 +527,23 @@ function App() {
         <section className="strike-section">
           <div className="strike-heading"><div className="section-label">Strike <strong>{activeLeg.strike || "—"}{activeLeg.type === "call" ? "C" : "P"}</strong></div><span>Select a {activeLeg.type === "call" ? "call" : "put"} strike for this leg</span></div>
           <div className="strike-grid" role="group" aria-label={`${activeLeg.type === "call" ? "Call" : "Put"} strikes`}>
-            {strikeContracts.map((contract) => (
-              <button
-                type="button"
-                key={contract.symbol}
-                className={`strike-option ${activeLeg.strike === contract.strike ? "selected" : ""}`}
-                onClick={() => chooseStrike(contract)}
-                aria-label={`${formatStrike(contract.strike)} ${activeLeg.type === "call" ? "call" : "put"} strike`}
-                aria-pressed={activeLeg.strike === contract.strike}
-              >
-                <strong>{formatStrike(contract.strike)}</strong>
-                <small>{activeLeg.type === "call" ? "CALL" : "PUT"}</small>
-              </button>
-            ))}
+            {strikeContracts.map((contract) => {
+              const delta = optionResponse ? findQuote(optionResponse, contract.symbol)?.greeks?.delta ?? null : null;
+              return (
+                <button
+                  type="button"
+                  key={contract.symbol}
+                  className={`strike-option ${activeLeg.strike === contract.strike ? "selected" : ""}`}
+                  onClick={() => chooseStrike(contract)}
+                  aria-label={`${formatStrike(contract.strike)} ${activeLeg.type === "call" ? "call" : "put"} strike, delta ${formatDelta(delta)}`}
+                  aria-pressed={activeLeg.strike === contract.strike}
+                >
+                  <strong>{formatStrike(contract.strike)}</strong>
+                  <small>{activeLeg.type === "call" ? "CALL" : "PUT"}</small>
+                  <span className="strike-delta">Delta {formatDelta(delta)}</span>
+                </button>
+              );
+            })}
             {!strikeContracts.length && <span className="strike-empty">No active strikes available for this leg.</span>}
           </div>
           <div className="strike-context"><span>{strikeContracts.length ? `${strikeContracts.length} available strikes` : "—"}</span><span className="spot-marker">{symbol} {spot != null ? spot.toFixed(2) : "—"}</span></div>
@@ -540,12 +650,14 @@ function App() {
         <section className="leg-list" aria-label="Position legs">
           {legs.map((positionLeg) => {
             const positionEntryPrice = positionLeg.id === activeLeg.id ? entryPrice : positionLeg.price;
+            const positionContract = findContract(chain, positionLeg);
+            const positionDelta = positionContract && optionResponse ? findQuote(optionResponse, positionContract.symbol)?.greeks?.delta ?? null : null;
             return (
               <div className={`leg-card ${positionLeg.id === activeLeg.id ? "active" : ""}`} key={positionLeg.id}>
                 <button className="leg-select" onClick={() => setActiveLegId(positionLeg.id)} aria-pressed={positionLeg.id === activeLeg.id}>
                   <div className={`leg-side ${positionLeg.side}`}>{positionLeg.side === "buy" ? "BTO" : "STO"}</div>
                   <div className="leg-main"><strong>{symbol} {positionLeg.strike || "—"}{positionLeg.type === "call" ? "C" : "P"}</strong><span>{positionLeg.expiry || "—"} · {positionLeg.quantity} contract{positionLeg.quantity === 1 ? "" : "s"}</span></div>
-                  <div className="leg-price"><span>Entry price · {pricingModeLabel.toLowerCase()}</span><strong>{positionLeg.priceLoaded ? price.format(positionEntryPrice) : "—"}</strong></div>
+                  <div className="leg-price"><span>Entry price · {pricingModeLabel.toLowerCase()}</span><strong>{positionLeg.priceLoaded ? price.format(positionEntryPrice) : "—"}</strong><span className="leg-delta">Delta {formatDelta(positionDelta)}</span></div>
                 </button>
                 <div className="leg-actions">
                   <button className="button subtle" onClick={() => switchType(positionLeg)} disabled={!chain}>Switch to {positionLeg.type === "call" ? "put" : "call"}</button>
@@ -557,9 +669,63 @@ function App() {
           <button className="button subtle add-leg" onClick={addLeg}>+ Add leg</button>
         </section>
         <div className="data-context">Observed market data: {context?.source ?? mode}, {freshness}, observed {observedAt}, pricing mode {formatPricingMode(observedPricingMode)}. Modelled scenario: aggregate expiration intrinsic value using each recorded entry price when all leg expiries are aligned; no pre-expiry valuation.</div>
+          </div>
+        )}
       </section>
       <footer className="footer-note">Educational estimates only · Observed data and modelled scenario output are shown separately · No trading actions are available</footer>
     </main>
+  );
+}
+
+function SavedStrategiesPanel({
+  strategies,
+  onBuild,
+  onLoad,
+  onDelete
+}: {
+  strategies: SavedStrategy[];
+  onBuild: () => void;
+  onLoad: (strategy: SavedStrategy) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <section className="saved-panel" aria-label="Saved strategies">
+      <div className="saved-panel-heading">
+        <div>
+          <span className="eyebrow">Local library</span>
+          <h1>Saved trades</h1>
+          <p>Saved in this browser as local JSON. Loading a strategy refreshes its read-only market-data context.</p>
+        </div>
+        <button className="button primary" onClick={onBuild}>Back to builder</button>
+      </div>
+      {!strategies.length ? (
+        <div className="saved-empty">
+          <strong>No saved strategies yet</strong>
+          <span>Build a fixture strategy, then use Save trade to keep its legs, assumptions, and observed-data provenance locally.</span>
+        </div>
+      ) : (
+        <div className="saved-list">
+          {strategies.map((strategy) => (
+            <article className="saved-card" key={strategy.id}>
+              <div className="saved-card-main">
+                <span className="section-label">{strategy.strategyName}</span>
+                <h2>{strategy.name}</h2>
+                <p>{strategy.symbol} · {strategy.legs.length} leg{strategy.legs.length === 1 ? "" : "s"} · updated {formatSavedTimestamp(strategy.updatedAt)}</p>
+              </div>
+              <div className="saved-card-details">
+                <span>{formatSavedProvenance(strategy)}</span>
+                <span>{formatSavedAssumptions(strategy)}</span>
+              </div>
+              <div className="saved-card-actions">
+                <button className="button primary" onClick={() => onLoad(strategy)}>Load</button>
+                <button className="button subtle remove-leg" onClick={() => onDelete(strategy.id)}>Delete</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      <div className="saved-boundary">Observed market data is stored as provenance; payoff and summary values remain modelled from the recorded position snapshot. No order or account actions are available.</div>
+    </section>
   );
 }
 
@@ -634,6 +800,29 @@ function formatExpirationKind(expiry: Pick<ChainExpiration, "expiration_date" | 
 
 function formatPricingMode(value: PricingMode): string {
   return value === "midpoint" ? "Midpoint" : value === "bid" ? "Bid" : value === "ask" ? "Ask" : "Last";
+}
+
+function formatDelta(value: number | null): string {
+  if (value == null) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function formatSavedTimestamp(value: string): string {
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime())
+    ? "unknown time"
+    : timestamp.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatSavedProvenance(strategy: SavedStrategy): string {
+  const freshness = strategy.provenance.stale ? "stale" : strategy.provenance.delayed ? "delayed" : "observed";
+  return `${strategy.provenance.source === "fixture" ? "Fixture" : "Tastytrade"} · ${formatPricingMode(strategy.provenance.pricingMode)} · ${freshness}`;
+}
+
+function formatSavedAssumptions(strategy: SavedStrategy): string {
+  const scenarioDate = strategy.assumptions.scenarioDate || "no scenario date";
+  const overrideCount = Object.keys(strategy.assumptions.impliedVolatilityOverrides).length;
+  return `Scenario ${scenarioDate} · ${overrideCount} IV override${overrideCount === 1 ? "" : "s"}`;
 }
 
 function Metric({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone: "neutral" | "loss" | "profit" }) {

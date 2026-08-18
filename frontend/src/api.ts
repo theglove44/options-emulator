@@ -76,6 +76,7 @@ export type QuoteSnapshot = {
 
 export type QuoteResponse = DataContext & {
   items: QuoteSnapshot[];
+  spot_price: number | null;
 };
 
 type HealthResponse = {

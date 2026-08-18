@@ -42,15 +42,41 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(quotes.status_code, 200)
         self.assertEqual(len(quotes.json()["items"]), 2)
         self.assertEqual(quotes.json()["pricing_mode"], "ask")
+        self.assertEqual(quotes.json()["spot_price"], 14.18)
 
         greeks = self.client.get("/api/greeks", params={"symbols": option})
         self.assertEqual(greeks.status_code, 200)
-        self.assertEqual(greeks.json()["items"][0]["greeks"]["delta"], 0.56)
+        self.assertEqual(greeks.json()["items"][0]["greeks"]["delta"], 0.61)
 
     def test_quotes_require_at_least_one_symbol(self) -> None:
         response = self.client.get("/api/quotes")
 
         self.assertEqual(response.status_code, 400)
+
+    def test_aapl_option_quotes_return_strike_specific_deltas(self) -> None:
+        chain = self.client.get("/api/chains/AAPL").json()
+        expiry = next(
+            item for item in chain["expirations"] if item["expiration_date"] == "2026-09-18"
+        )
+        calls = {
+            contract["strike"]: contract["symbol"]
+            for contract in expiry["contracts"]
+            if contract["option_type"] == "call"
+        }
+
+        response = self.client.get(
+            "/api/quotes",
+            params=[
+                ("symbols", calls[290.0]),
+                ("symbols", calls[315.0]),
+                ("pricing_mode", "midpoint"),
+            ],
+        )
+
+        self.assertEqual(response.status_code, 200)
+        deltas = {item["strike"]: item["greeks"]["delta"] for item in response.json()["items"]}
+        self.assertAlmostEqual(deltas[290.0], 0.86)
+        self.assertAlmostEqual(deltas[315.0], 0.31)
 
     def test_live_mode_without_credentials_fails_closed_at_the_api(self) -> None:
         client = TestClient(create_app(TastytradeMarketDataAdapter(None, None)))
