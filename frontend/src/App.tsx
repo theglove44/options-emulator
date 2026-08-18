@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchChain, fetchHealth, fetchQuotes, fetchSymbolSearch } from "./api";
 import type { ChainExpiration, OptionChainResponse, OptionContract, PricingMode, QuoteResponse, QuoteSnapshot, SymbolResult } from "./api";
 import { initialLeg } from "./mockData";
-import { buildPositionProfile, hasUnboundedProfit, summarizePosition } from "./position";
+import { buildPositionProfile, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
 import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
 import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
 import { clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent } from "./scenario";
@@ -227,6 +227,17 @@ function App() {
   const maxPnl = profile.length ? Math.max(...profile.map((point) => point.pnl)) : 0;
   const minPnl = profile.length ? Math.min(...profile.map((point) => point.pnl)) : 0;
   const summary = useMemo(() => summarizePosition(legs), [legs]);
+  const observedGreeks = useMemo(() => summarizeObservedGreeks(legs.map((leg) => {
+    const contract = findContract(chain, leg);
+    const quote = contract && optionResponse ? findQuote(optionResponse, contract.symbol) : null;
+    return {
+      side: leg.side,
+      quantity: leg.quantity,
+      multiplier: leg.multiplier,
+      selectedPrice: quote?.selected_price ?? null,
+      greeks: quote?.greeks ?? null
+    };
+  })), [chain, legs, optionResponse]);
   const breakeven = legs.length === 1 && activeLeg.priceLoaded ? calculateBreakeven(activeLeg) : null;
   const strategyName = strategyTemplate?.label ?? "Custom position";
   const breakevenChange = breakeven != null && spotValue > 0 ? ((breakeven / spotValue - 1) * 100).toFixed(1) : "0.0";
@@ -630,6 +641,25 @@ function App() {
           <Metric label="Breakeven" value={breakeven != null && activeLeg.strike ? `${activeLeg.type === "call" ? "Above" : "Below"} ${breakeven.toFixed(2)}` : "Multi-leg"} detail={breakeven != null && activeLeg.strike ? `${Number(breakevenChange) >= 0 ? "+" : ""}${breakevenChange}%` : "See aggregate graph"} tone="neutral" />
         </section>
 
+        <section className="greeks-panel" aria-label="Observed aggregate Greeks">
+          <div className="greeks-heading">
+            <div><span className="section-label">Observed aggregate Greeks</span><strong>Position sensitivity</strong></div>
+            <span className="greeks-status">
+              {context
+                ? `Observed · ${context.source === "fixture" ? "Fixture" : "Tastytrade"} · ${observedAt}${observedGreeks.complete ? "" : " · waiting for complete leg quotes"}`
+                : "Observed data not loaded"}
+            </span>
+          </div>
+          <div className="greeks-grid">
+            <GreekMetric label="Delta" value={observedGreeks.delta} />
+            <GreekMetric label="Gamma" value={observedGreeks.gamma} />
+            <GreekMetric label="Theta" value={observedGreeks.theta} />
+            <GreekMetric label="Vega" value={observedGreeks.vega} />
+            <GreekMetric label="Rho" value={observedGreeks.rho} />
+          </div>
+          <p className="greeks-note">Observed contract Greeks are signed by side and weighted by quantity × contract multiplier. They do not alter the modelled expiration payoff.</p>
+        </section>
+
         <section className="chart-panel">
           <div className="chart-header">
             <div><span className="section-label">Projected outcome</span><strong>At expiration</strong></div>
@@ -803,6 +833,10 @@ function formatPricingMode(value: PricingMode): string {
 }
 
 function formatDelta(value: number | null): string {
+  return formatGreek(value);
+}
+
+function formatGreek(value: number | null): string {
   if (value == null) return "—";
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
@@ -827,6 +861,10 @@ function formatSavedAssumptions(strategy: SavedStrategy): string {
 
 function Metric({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone: "neutral" | "loss" | "profit" }) {
   return <div className="metric"><span>{label}</span><strong className={tone}>{value}</strong>{detail && <small>{detail}</small>}</div>;
+}
+
+function GreekMetric({ label, value }: { label: string; value: number | null }) {
+  return <div className="greek-metric"><span>{label}</span><strong>{formatGreek(value)}</strong></div>;
 }
 
 type GraphPoint = { price: number; pnl: number };

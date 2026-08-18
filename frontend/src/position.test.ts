@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionProfile, hasUnboundedProfit, summarizePosition } from "./position";
+import { buildPositionProfile, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
 import type { Leg } from "./types";
 
 const longCall: Leg = {
@@ -12,6 +12,14 @@ const longCall: Leg = {
   price: 0.9,
   priceLoaded: true,
   multiplier: 100
+};
+
+const longCallGreeks = {
+  side: "buy" as const,
+  quantity: 1,
+  multiplier: 100,
+  selectedPrice: 1.08,
+  greeks: { delta: 0.56, gamma: 0.12, theta: -0.04, vega: 0.08, rho: 0.02 }
 };
 
 describe("position editing seam", () => {
@@ -39,6 +47,46 @@ describe("position editing seam", () => {
       netDebit: 55,
       netCredit: 0
     });
+  });
+
+  it("summarises complete observed Greeks with side, quantity, and multiplier", () => {
+    const summary = summarizeObservedGreeks([
+      longCallGreeks,
+      {
+        ...longCallGreeks,
+        side: "sell",
+        quantity: 2,
+        multiplier: 10,
+        selectedPrice: 0.4,
+        greeks: { delta: -0.44, gamma: 0.12, theta: -0.04, vega: 0.08, rho: -0.02 }
+      }
+    ]);
+
+    expect(summary.complete).toBe(true);
+    expect(summary.delta).toBeCloseTo(64.8);
+    expect(summary.gamma).toBeCloseTo(9.6);
+    expect(summary.theta).toBeCloseTo(-3.2);
+    expect(summary.vega).toBeCloseTo(6.4);
+    expect(summary.rho).toBeCloseTo(2.4);
+  });
+
+  it("accepts a zero observed price as loaded data", () => {
+    expect(summarizeObservedGreeks([{ ...longCallGreeks, selectedPrice: 0 }]).complete).toBe(true);
+  });
+
+  it("withholds the aggregate when a leg price or Greek is missing", () => {
+    expect(summarizeObservedGreeks([{ ...longCallGreeks, selectedPrice: null }])).toEqual({
+      complete: false,
+      delta: null,
+      gamma: null,
+      theta: null,
+      vega: null,
+      rho: null
+    });
+    expect(summarizeObservedGreeks([{
+      ...longCallGreeks,
+      greeks: { ...longCallGreeks.greeks, vega: null }
+    }]).complete).toBe(false);
   });
 
   it("sums each leg into the modelled expiration profile", () => {

@@ -91,6 +91,15 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .metric .profit { color: #53dd85; }
 .metric .loss { color: #f06876; }
 .metric .neutral { color: #f2f5ff; }
+.greeks-panel { margin: 0 0 18px; padding: 16px 18px 14px; border: 1px solid #26345c; background: #0d1434; }
+.greeks-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.greeks-heading strong { display: block; margin-top: 6px; font-size: 14px; }
+.greeks-status { color: #d6b85a; font-size: 11px; text-align: right; }
+.greeks-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; margin-top: 15px; background: #222c50; border: 1px solid #222c50; }
+.greek-metric { min-height: 72px; padding: 14px 16px; background: #0e1433; display: flex; flex-direction: column; gap: 8px; }
+.greek-metric span { color: #8794b8; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; }
+.greek-metric strong { color: #f2f5ff; font-size: 19px; }
+.greeks-note { margin: 12px 0 0; color: #7180a2; font-size: 11px; line-height: 1.5; }
 .position-summary { display: flex; align-items: center; gap: 30px; margin: 18px 0 0; padding: 13px 18px; border: 1px solid #26345c; background: #0d1434; }
 .position-summary > div { display: flex; flex-direction: column; gap: 5px; }
 .position-summary strong { font-size: 14px; }
