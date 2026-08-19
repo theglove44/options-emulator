@@ -30,7 +30,7 @@ const draft: SavedStrategyDraft = {
   symbol: "ETHA",
   strategyTemplateId: "long-call",
   strategyName: "Long Call",
-  legs: [{ ...initialLeg, strike: 14, expiry: "2026-09-18", price: 0.9, priceLoaded: true }],
+  legs: [{ ...initialLeg, strike: 14, expiry: "2026-09-18", price: 1.1, priceLoaded: true, observedPrice: 0.9, customPrice: 1.1 }],
   provenance: {
     source: "fixture",
     observedAt: "2026-08-17T14:00:00Z",
@@ -40,7 +40,8 @@ const draft: SavedStrategyDraft = {
   },
   assumptions: {
     scenarioDate: "2026-08-24",
-    impliedVolatilityOverrides: { "ETHA  260918C00014000": 0.42 }
+    impliedVolatilityOverrides: { "ETHA  260918C00014000": 0.42 },
+    commissionPerContract: 0.65
   }
 };
 
@@ -52,6 +53,9 @@ describe("local saved strategies", () => {
     expect(saved.id).toBe("saved-1");
     expect(listSavedStrategies(storage)).toEqual([saved]);
     expect(JSON.parse(storage.getItem(SAVED_STRATEGIES_STORAGE_KEY) ?? "[]")[0].provenance).toEqual(draft.provenance);
+    expect(saved.assumptions.commissionPerContract).toBe(0.65);
+    expect(saved.legs[0].customPrice).toBe(1.1);
+    expect(saved.legs[0].observedPrice).toBe(0.9);
 
     draft.legs[0].strike = 99;
     expect(listSavedStrategies(storage)[0].legs[0].strike).toBe(14);
@@ -74,5 +78,14 @@ describe("local saved strategies", () => {
 
     storage.setItem(SAVED_STRATEGIES_STORAGE_KEY, JSON.stringify([{ id: "incomplete" }]));
     expect(listSavedStrategies(storage)).toEqual([]);
+  });
+
+  it("loads older snapshots without a commission assumption", () => {
+    const storage = new MemoryStorage();
+    const older = { ...draft, assumptions: { scenarioDate: draft.assumptions.scenarioDate, impliedVolatilityOverrides: {} } };
+    storage.setItem(SAVED_STRATEGIES_STORAGE_KEY, JSON.stringify([{ ...older, id: "old", createdAt: "now", updatedAt: "now" }]));
+
+    expect(listSavedStrategies(storage)).toHaveLength(1);
+    expect(listSavedStrategies(storage)[0].assumptions.commissionPerContract).toBeUndefined();
   });
 });

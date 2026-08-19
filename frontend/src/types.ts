@@ -11,6 +11,10 @@ export type Leg = {
   price: number;
   priceLoaded: boolean;
   multiplier: number;
+  /** The observed quote retained when a modelled custom entry price is active. */
+  observedPrice?: number | null;
+  /** A modelled entry-price override, kept separate from the observed quote. */
+  customPrice?: number | null;
 };
 
 export type ProfilePoint = {

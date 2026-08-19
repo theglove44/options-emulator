@@ -92,6 +92,7 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .metric .loss { color: #f06876; }
 .metric .neutral { color: #f2f5ff; }
 .greeks-panel { margin: 0 0 18px; padding: 16px 18px 14px; border: 1px solid #26345c; background: #0d1434; }
+.modelled-greeks-panel { border-color: #315579; background: #0d1938; }
 .greeks-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .greeks-heading strong { display: block; margin-top: 6px; font-size: 14px; }
 .greeks-status { color: #d6b85a; font-size: 11px; text-align: right; }
@@ -102,6 +103,11 @@ h1 { font-size: 28px; margin: 7px 0 0; letter-spacing: -.8px; }
 .greeks-note { margin: 12px 0 0; color: #7180a2; font-size: 11px; line-height: 1.5; }
 .scenario-model-panel { margin: 0 0 18px; padding: 16px 18px 14px; border: 1px solid #315579; background: #0d1938; }
 .scenario-model-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 15px; background: #263c62; border: 1px solid #263c62; }
+.overlay-events { display: grid; gap: 8px; margin-top: 12px; }
+.overlay-event { display: grid; gap: 5px; padding: 10px 12px; border: 1px solid #26345c; background: #0e1433; }
+.overlay-event > div { display: flex; justify-content: space-between; gap: 14px; }
+.overlay-event strong { color: #f1f5ff; font-size: 12px; }
+.overlay-event span, .overlay-event small { color: #8191b3; font-size: 11px; line-height: 1.45; }
 .position-summary { display: flex; align-items: center; gap: 30px; margin: 18px 0 0; padding: 13px 18px; border: 1px solid #26345c; background: #0d1434; }
 .position-summary > div { display: flex; flex-direction: column; gap: 5px; }
 .position-summary strong { font-size: 14px; }

@@ -2,6 +2,14 @@ import type { Leg } from "./types";
 
 export const DEFAULT_RISK_FREE_RATE = 0.05;
 
+export type OptionGreekValues = {
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  rho: number;
+};
+
 export function parseVolatilityPercent(value: string): number | null {
   if (!value.trim()) return null;
   const percentage = Number(value);
@@ -60,7 +68,45 @@ function normalCdf(value: number): number {
   const magnitude = Math.abs(value) / Math.sqrt(2);
   // Abramowitz and Stegun 7.1.26, accurate enough for display estimates.
   const t = 1 / (1 + 0.3275911 * magnitude);
-  const polynomial = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
-  const erf = sign * polynomial * Math.exp(-magnitude * magnitude);
+  const polynomial = (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+  const erf = sign * (1 - polynomial * Math.exp(-magnitude * magnitude));
   return 0.5 * (1 + erf);
+}
+
+export function calculateOptionGreeks(
+  leg: Pick<Leg, "type" | "strike" | "expiry">,
+  underlyingPrice: number,
+  volatility: number,
+  scenarioDate: string,
+  riskFreeRate = DEFAULT_RISK_FREE_RATE
+): OptionGreekValues | null {
+  if (underlyingPrice <= 0 || leg.strike <= 0 || volatility <= 0) return null;
+  const timeToExpiry = yearFraction(scenarioDate, leg.expiry);
+  if (timeToExpiry == null || timeToExpiry <= 0) return null;
+
+  const volatilityRootTime = volatility * Math.sqrt(timeToExpiry);
+  const d1 = (
+    Math.log(underlyingPrice / leg.strike)
+    + (riskFreeRate + (volatility * volatility) / 2) * timeToExpiry
+  ) / volatilityRootTime;
+  const d2 = d1 - volatilityRootTime;
+  const discountFactor = Math.exp(-riskFreeRate * timeToExpiry);
+  const density = normalPdf(d1);
+  const isCall = leg.type === "call";
+
+  return {
+    delta: isCall ? normalCdf(d1) : normalCdf(d1) - 1,
+    gamma: density / (underlyingPrice * volatilityRootTime),
+    theta: (
+      -(underlyingPrice * density * volatility) / (2 * Math.sqrt(timeToExpiry))
+      + (isCall ? -1 : 1) * riskFreeRate * leg.strike * discountFactor * (isCall ? normalCdf(d2) : normalCdf(-d2))
+    ) / 365,
+    // Vega and rho are quoted per one percentage-point change.
+    vega: underlyingPrice * density * Math.sqrt(timeToExpiry) / 100,
+    rho: (isCall ? 1 : -1) * leg.strike * timeToExpiry * discountFactor * (isCall ? normalCdf(d2) : normalCdf(-d2)) / 100
+  };
+}
+
+function normalPdf(value: number): number {
+  return Math.exp(-(value * value) / 2) / Math.sqrt(2 * Math.PI);
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
+import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeModelledGreeks, summarizeObservedGreeks, summarizePosition } from "./position";
 import type { Leg } from "./types";
 
 const longCall: Leg = {
@@ -45,8 +45,25 @@ describe("position editing seam", () => {
       legCount: 2,
       netCashFlow: 55,
       netDebit: 55,
-      netCredit: 0
+      netCredit: 0,
+      entryCommission: 0
     });
+  });
+
+  it("applies per-contract commissions to entry cash flow and expiration P&L", () => {
+    const summary = summarizePosition([longCall], 0.65);
+    const profile = buildPositionProfile([longCall], 14, 0.14, 0.65);
+
+    expect(summary.netDebit).toBeCloseTo(90.65);
+    expect(summary.entryCommission).toBeCloseTo(0.65);
+    expect(profile.find((point) => point.price === 14)?.pnl).toBeCloseTo(-91.3);
+  });
+
+  it("keeps custom entry prices in the same multiplier and cash-flow convention", () => {
+    const customPriceLeg = { ...longCall, price: 1.2, customPrice: 1.2, observedPrice: 0.9 };
+
+    expect(summarizePosition([customPriceLeg]).netDebit).toBeCloseTo(120);
+    expect(buildPositionProfile([customPriceLeg], 14).find((point) => point.price === 14)?.pnl).toBeCloseTo(-120);
   });
 
   it("summarises complete observed Greeks with side, quantity, and multiplier", () => {
@@ -186,5 +203,35 @@ describe("position editing seam", () => {
   it("withholds pre-expiry output when a leg IV is missing", () => {
     expect(calculatePreExpiryPnl([{ leg: longCall, volatility: null }], 14, "2026-08-18")).toBeNull();
     expect(buildPreExpiryProfile([{ leg: longCall, volatility: null }], 14, "2026-08-18")).toEqual([]);
+  });
+
+  it("aggregates modelled future Greeks with side, quantity, and multiplier", () => {
+    const oneContract = summarizeModelledGreeks([
+      { leg: { ...longCall, multiplier: 1 }, volatility: 0.45 }
+    ], 14, "2026-08-18");
+    const shortWeighted = summarizeModelledGreeks([
+      { leg: { ...longCall, side: "sell", quantity: 2, multiplier: 10 }, volatility: 0.45 }
+    ], 14, "2026-08-18");
+
+    expect(oneContract.complete).toBe(true);
+    expect(shortWeighted.complete).toBe(true);
+    expect(shortWeighted.delta).toBeCloseTo(-(oneContract.delta ?? 0) * 20);
+    expect(shortWeighted.gamma).toBeCloseTo(-(oneContract.gamma ?? 0) * 20);
+    expect(shortWeighted.theta).toBeCloseTo(-(oneContract.theta ?? 0) * 20);
+    expect(shortWeighted.vega).toBeCloseTo(-(oneContract.vega ?? 0) * 20);
+    expect(shortWeighted.rho).toBeCloseTo(-(oneContract.rho ?? 0) * 20);
+  });
+
+  it("withholds modelled future Greeks when scenario IV or date is missing", () => {
+    expect(summarizeModelledGreeks([{ leg: longCall, volatility: null }], 14, "2026-08-18").complete).toBe(false);
+    expect(summarizeModelledGreeks([{ leg: longCall, volatility: 0.45 }], 14, "").complete).toBe(false);
+  });
+
+  it("subtracts entry and exit commissions from pre-expiry modelled P&L", () => {
+    const withoutCommission = calculatePreExpiryPnl([{ leg: longCall, volatility: 0.45 }], 14, "2026-08-18");
+    const withCommission = calculatePreExpiryPnl([{ leg: longCall, volatility: 0.45 }], 14, "2026-08-18", 0.65);
+
+    expect(withoutCommission).not.toBeNull();
+    expect(withCommission).toBeCloseTo((withoutCommission ?? 0) - 1.3);
   });
 });

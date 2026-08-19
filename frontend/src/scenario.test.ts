@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateOptionPrice, clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent, yearFraction } from "./scenario";
+import { calculateOptionGreeks, calculateOptionPrice, clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent, yearFraction } from "./scenario";
 
 describe("scenario controls", () => {
   it("converts a positive percentage input into decimal volatility", () => {
@@ -35,5 +35,29 @@ describe("scenario controls", () => {
     const call = calculateOptionPrice({ type: "call", strike: 100, expiry: "2026-09-18" }, 110, 0.2, "2026-08-18");
     const put = calculateOptionPrice({ type: "put", strike: 100, expiry: "2026-09-18" }, 110, 0.2, "2026-08-18");
     expect(call).toBeGreaterThan(put ?? 0);
+  });
+
+  it("calculates deterministic future Greeks with explicit display units", () => {
+    const greeks = calculateOptionGreeks(
+      { type: "call", strike: 100, expiry: "2027-01-01" },
+      100,
+      0.2,
+      "2026-01-01"
+    );
+
+    expect(greeks?.delta).toBeCloseTo(0.6368, 3);
+    expect(greeks?.gamma).toBeCloseTo(0.0188, 3);
+    expect(greeks?.theta).toBeCloseTo(-0.0176, 3);
+    expect(greeks?.vega).toBeCloseTo(0.3752, 3);
+    expect(greeks?.rho).toBeCloseTo(0.5323, 3);
+  });
+
+  it("returns no future Greeks when the option has expired", () => {
+    expect(calculateOptionGreeks(
+      { type: "call", strike: 100, expiry: "2026-01-01" },
+      100,
+      0.2,
+      "2026-01-02"
+    )).toBeNull();
   });
 });

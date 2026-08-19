@@ -17,6 +17,7 @@ export type SavedStrategyProvenance = {
 export type SavedStrategyAssumptions = {
   scenarioDate: string;
   impliedVolatilityOverrides: Record<string, number>;
+  commissionPerContract?: number;
 };
 
 export type SavedStrategyDraft = {
@@ -75,7 +76,8 @@ export function saveStrategy(
     provenance: { ...draft.provenance },
     assumptions: {
       scenarioDate: draft.assumptions.scenarioDate,
-      impliedVolatilityOverrides: { ...draft.assumptions.impliedVolatilityOverrides }
+      impliedVolatilityOverrides: { ...draft.assumptions.impliedVolatilityOverrides },
+      commissionPerContract: draft.assumptions.commissionPerContract ?? 0
     }
   };
 
@@ -125,7 +127,9 @@ function isSavedStrategy(value: unknown): value is SavedStrategy {
     && isPricingMode(provenance.pricingMode)
     && isRecord(assumptions)
     && typeof assumptions.scenarioDate === "string"
-    && isNumberRecord(assumptions.impliedVolatilityOverrides);
+    && isNumberRecord(assumptions.impliedVolatilityOverrides)
+    && (assumptions.commissionPerContract === undefined
+      || (typeof assumptions.commissionPerContract === "number" && Number.isFinite(assumptions.commissionPerContract) && assumptions.commissionPerContract >= 0));
 }
 
 function isLeg(value: unknown): value is Leg {
@@ -138,7 +142,9 @@ function isLeg(value: unknown): value is Leg {
     && typeof value.quantity === "number"
     && typeof value.price === "number"
     && typeof value.priceLoaded === "boolean"
-    && typeof value.multiplier === "number";
+    && typeof value.multiplier === "number"
+    && (value.observedPrice === undefined || value.observedPrice === null || typeof value.observedPrice === "number")
+    && (value.customPrice === undefined || value.customPrice === null || (typeof value.customPrice === "number" && Number.isFinite(value.customPrice) && value.customPrice >= 0));
 }
 
 function isSavedStrategySource(value: unknown): value is SavedStrategySource {

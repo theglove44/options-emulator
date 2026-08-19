@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchChain, fetchHealth, fetchQuotes, fetchSymbolSearch } from "./api";
 import type { ChainExpiration, OptionChainResponse, OptionContract, PricingMode, QuoteResponse, QuoteSnapshot, SymbolResult } from "./api";
 import { initialLeg } from "./mockData";
-import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeObservedGreeks, summarizePosition } from "./position";
+import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeModelledGreeks, summarizeObservedGreeks, summarizePosition } from "./position";
 import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
 import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
 import { clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent } from "./scenario";
 import { deleteSavedStrategy, listSavedStrategies, saveStrategy } from "./savedStrategies";
 import type { SavedStrategy } from "./savedStrategies";
 import type { Leg } from "./types";
+import { getFixtureMarketOverlay } from "./marketOverlay";
 
 const money = new Intl.NumberFormat("en-GB", {
   style: "currency",
@@ -36,6 +37,7 @@ function App() {
   const [optionResponse, setOptionResponse] = useState<QuoteResponse | null>(null);
   const [mode, setMode] = useState<"fixture" | "tastytrade">("fixture");
   const [pricingMode, setPricingMode] = useState<PricingMode>("midpoint");
+  const [commissionPerContract, setCommissionPerContract] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
@@ -105,10 +107,10 @@ function App() {
             && selectedTemplateId !== "custom"
             && chain?.underlying_symbol === requestedSymbol
             && !existingContract;
-          if (preserveInvalidTemplateLeg) return { ...item, price: 0, priceLoaded: false };
+          if (preserveInvalidTemplateLeg) return resetLegQuote(item);
           return contract
-            ? { ...item, expiry: contract.expiration_date, strike: contract.strike, type: contract.option_type, price: 0, priceLoaded: false, multiplier: contract.shares_per_contract }
-            : { ...item, expiry: "", strike: 0, price: 0, priceLoaded: false };
+            ? { ...resetLegQuote(item), expiry: contract.expiration_date, strike: contract.strike, type: contract.option_type, multiplier: contract.shares_per_contract }
+            : { ...resetLegQuote(item), expiry: "", strike: 0 };
         }));
       } catch (caught) {
         if (!cancelled) {
@@ -119,7 +121,7 @@ function App() {
           setUnderlyingQuote(null);
           setOptionResponse(null);
           setSpot(null);
-          setLegs((current) => current.map((item) => ({ ...item, price: 0, priceLoaded: false })));
+          setLegs((current) => current.map((item) => resetLegQuote(item)));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -203,7 +205,10 @@ function App() {
         setLegs((current) => current.map((item) => {
           const contract = findContract(chain, item);
           const quote = contract ? findQuote(quotes, contract.symbol) : null;
-          return quote?.selected_price != null ? { ...item, price: quote.selected_price, priceLoaded: true } : item;
+          if (quote?.selected_price == null) return item;
+          return item.customPrice != null
+            ? { ...item, observedPrice: quote.selected_price, price: item.customPrice, priceLoaded: true }
+            : { ...item, observedPrice: quote.selected_price, price: quote.selected_price, priceLoaded: true };
         }));
       })
       .catch((caught) => {
@@ -220,13 +225,13 @@ function App() {
   const allLegsPriced = legs.every((item) => item.priceLoaded);
   const profile = useMemo(
     () => (spotValue > 0 && legs.length > 0 && !hasMixedExpiries && legs.every((item) => item.strike > 0 && item.priceLoaded)
-      ? buildPositionProfile(legs, spotValue, range / 100)
+      ? buildPositionProfile(legs, spotValue, range / 100, commissionPerContract)
       : []),
-    [hasMixedExpiries, legs, range, spotValue]
+    [commissionPerContract, hasMixedExpiries, legs, range, spotValue]
   );
   const maxPnl = profile.length ? Math.max(...profile.map((point) => point.pnl)) : 0;
   const minPnl = profile.length ? Math.min(...profile.map((point) => point.pnl)) : 0;
-  const summary = useMemo(() => summarizePosition(legs), [legs]);
+  const summary = useMemo(() => summarizePosition(legs, commissionPerContract), [commissionPerContract, legs]);
   const observedGreeks = useMemo(() => summarizeObservedGreeks(legs.map((leg) => {
     const contract = findContract(chain, leg);
     const quote = contract && optionResponse ? findQuote(optionResponse, contract.symbol) : null;
@@ -246,19 +251,23 @@ function App() {
       volatility: contract ? impliedVolatilityOverrides[contract.symbol] ?? quote?.greeks?.implied_volatility ?? null : null
     };
   }), [chain, impliedVolatilityOverrides, legs, optionResponse]);
+  const modelledFutureGreeks = useMemo(
+    () => summarizeModelledGreeks(preExpiryInputs, spotValue, scenarioDate),
+    [preExpiryInputs, scenarioDate, spotValue]
+  );
   const preExpiryProfile = useMemo(
     () => (spotValue > 0 && scenarioDate && !hasMixedExpiries
-      ? buildPreExpiryProfile(preExpiryInputs, spotValue, scenarioDate, range / 100)
+      ? buildPreExpiryProfile(preExpiryInputs, spotValue, scenarioDate, range / 100, commissionPerContract)
       : []),
-    [hasMixedExpiries, preExpiryInputs, range, scenarioDate, spotValue]
+    [commissionPerContract, hasMixedExpiries, preExpiryInputs, range, scenarioDate, spotValue]
   );
   const preExpiryPnl = useMemo(
     () => (spotValue > 0 && scenarioDate && !hasMixedExpiries
-      ? calculatePreExpiryPnl(preExpiryInputs, spotValue, scenarioDate)
+      ? calculatePreExpiryPnl(preExpiryInputs, spotValue, scenarioDate, commissionPerContract)
       : null),
-    [hasMixedExpiries, preExpiryInputs, scenarioDate, spotValue]
+    [commissionPerContract, hasMixedExpiries, preExpiryInputs, scenarioDate, spotValue]
   );
-  const breakeven = legs.length === 1 && activeLeg.priceLoaded ? calculateBreakeven(activeLeg) : null;
+  const breakeven = legs.length === 1 && activeLeg.priceLoaded ? calculateBreakeven(activeLeg, commissionPerContract) : null;
   const strategyName = strategyTemplate?.label ?? "Custom position";
   const breakevenChange = breakeven != null && spotValue > 0 ? ((breakeven / spotValue - 1) * 100).toFixed(1) : "0.0";
   const context = optionResponse ?? underlyingResponse ?? chain;
@@ -266,6 +275,7 @@ function App() {
   const observedAt = context ? new Date(context.observed_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "—";
   const observedPricingMode = context?.pricing_mode ?? pricingMode;
   const pricingModeLabel = formatPricingMode(pricingMode);
+  const fixtureOverlay = useMemo(() => getFixtureMarketOverlay(symbol), [symbol]);
   const entryPrice = activeLeg.price;
   const cashFlowLabel = allLegsPriced
     ? (summary.netCashFlow > 0 ? "Net debit" : summary.netCashFlow < 0 ? "Net credit" : "Net cash flow")
@@ -289,7 +299,7 @@ function App() {
     setUnderlyingQuote(null);
     setOptionResponse(null);
     setSpot(null);
-    setLegs((current) => current.map((item) => ({ ...item, price: 0, priceLoaded: false })));
+    setLegs((current) => current.map((item) => resetLegQuote(item)));
     setLoading(true);
   }
 
@@ -304,6 +314,7 @@ function App() {
       setRefreshToken((value) => value + 1);
       return;
     }
+    setLegs((current) => current.map((item) => resetLegQuote(item, true)));
     setSymbol(nextSymbol);
   }
 
@@ -331,12 +342,12 @@ function App() {
       .sort((left, right) => Math.abs(left.strike - activeLeg.strike) - Math.abs(right.strike - activeLeg.strike))[0];
     const nextStrike = matching?.strike ?? activeLeg.strike;
     if (activeLeg.expiry === expiry.expiration_date && activeLeg.strike === nextStrike) return;
-    updateActiveLeg({ expiry: expiry.expiration_date, strike: nextStrike, price: 0, priceLoaded: false, multiplier: matching?.shares_per_contract ?? activeLeg.multiplier });
+    updateActiveLeg({ ...resetLegQuote(activeLeg, true), expiry: expiry.expiration_date, strike: nextStrike, multiplier: matching?.shares_per_contract ?? activeLeg.multiplier });
   }
 
   function chooseStrike(contract: OptionContract) {
     if (activeLeg.strike === contract.strike) return;
-    updateActiveLeg({ strike: contract.strike, price: 0, priceLoaded: false, multiplier: contract.shares_per_contract });
+    updateActiveLeg({ ...resetLegQuote(activeLeg, true), strike: contract.strike, multiplier: contract.shares_per_contract });
   }
 
   function switchType(positionLeg: Leg = activeLeg) {
@@ -346,16 +357,29 @@ function App() {
       .filter((contract) => contract.option_type === nextType && contract.active)
       .sort((left, right) => Math.abs(left.strike - positionLeg.strike) - Math.abs(right.strike - positionLeg.strike))[0];
     setActiveLegId(positionLeg.id);
-    const nextLeg: Leg = { ...positionLeg, type: nextType, strike: matching?.strike ?? positionLeg.strike, price: 0, priceLoaded: false, multiplier: matching?.shares_per_contract ?? positionLeg.multiplier };
+    const nextLeg: Leg = { ...resetLegQuote(positionLeg, true), type: nextType, strike: matching?.strike ?? positionLeg.strike, multiplier: matching?.shares_per_contract ?? positionLeg.multiplier };
     setLegs((current) => current.map((item) => item.id === positionLeg.id ? nextLeg : item));
     setSelectedTemplateId(legs.length === 1 ? templateForLeg(nextLeg).id : "custom");
   }
 
   function addLeg() {
     const nextId = nextLegId(legs);
-    setLegs([...legs, { ...activeLeg, id: nextId }]);
+    const observedPrice = activeLeg.observedPrice ?? null;
+    setLegs([...legs, { ...activeLeg, id: nextId, customPrice: null, observedPrice, price: observedPrice ?? 0, priceLoaded: observedPrice != null }]);
     setActiveLegId(nextId);
     setSelectedTemplateId("custom");
+  }
+
+  function updateCustomEntryPrice(value: string) {
+    if (!value.trim()) {
+      const observedPrice = activeLeg.observedPrice ?? null;
+      updateActiveLeg({ customPrice: null, price: observedPrice ?? 0, priceLoaded: observedPrice != null });
+      return;
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      updateActiveLeg({ customPrice: parsed, price: parsed, priceLoaded: true });
+    }
   }
 
   function removeLeg(legId: string = activeLeg.id) {
@@ -398,7 +422,8 @@ function App() {
         },
         assumptions: {
           scenarioDate,
-          impliedVolatilityOverrides
+          impliedVolatilityOverrides,
+          commissionPerContract
         }
       });
       setSavedStrategies((current) => [saved, ...current]);
@@ -416,11 +441,12 @@ function App() {
     setSymbol(saved.symbol);
     setSymbolInput(saved.symbol);
     setPricingMode(saved.provenance.pricingMode);
-    setLegs(saved.legs.map((leg) => ({ ...leg, price: 0, priceLoaded: false })));
+    setLegs(saved.legs.map((leg) => resetLegQuote(leg)));
     setActiveLegId(saved.legs[0]?.id ?? initialLeg.id);
     setSelectedTemplateId(saved.strategyTemplateId);
     setScenarioDate(saved.assumptions.scenarioDate);
     setImpliedVolatilityOverrides({ ...saved.assumptions.impliedVolatilityOverrides });
+    setCommissionPerContract(saved.assumptions.commissionPerContract ?? 0);
     setChain(null);
     setUnderlyingResponse(null);
     setUnderlyingQuote(null);
@@ -580,12 +606,51 @@ function App() {
           <div className="strike-context"><span>{strikeContracts.length ? `${strikeContracts.length} available strikes` : "—"}</span><span className="spot-marker">{symbol} {spot != null ? spot.toFixed(2) : "—"}</span></div>
         </section>
 
-        <section className="scenario-section" aria-label="Scenario controls">
+        <section className="scenario-section" aria-label="Modelled entry assumptions">
           <div className="scenario-heading">
-            <div><span className="section-label">Scenario inputs</span><strong>Recorded assumptions</strong></div>
-            <span className="scenario-status">Applied to pre-expiry model</span>
+            <div><span className="section-label">Modelled entry assumptions</span><strong>Recorded assumptions</strong></div>
+            <span className="scenario-status">Not observed market data</span>
           </div>
           <div className="scenario-controls">
+            <label className="scenario-field">
+              <span>Active leg custom price</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={activeLeg.customPrice == null ? "" : activeLeg.customPrice}
+                onChange={(event) => updateCustomEntryPrice(event.target.value)}
+                placeholder={activeLeg.observedPrice == null ? "—" : activeLeg.observedPrice.toFixed(2)}
+                aria-label="Active leg custom entry price"
+                disabled={!activeContract}
+              />
+              <small>
+                {activeLeg.customPrice != null
+                  ? `Override · observed ${activeLeg.observedPrice == null ? "—" : price.format(activeLeg.observedPrice)}`
+                  : activeLeg.observedPrice == null ? "Uses the selected quote when loaded" : `Observed ${price.format(activeLeg.observedPrice)}`}
+              </small>
+            </label>
+            {activeLeg.customPrice != null && (
+              <button className="button subtle scenario-reset" onClick={() => updateCustomEntryPrice("")}>Use observed price</button>
+            )}
+            <label className="scenario-field">
+              <span>Commission / contract</span>
+              <div className="volatility-input">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={commissionPerContract.toFixed(2)}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value);
+                    if (Number.isFinite(parsed) && parsed >= 0) setCommissionPerContract(parsed);
+                  }}
+                  aria-label="Commission per contract"
+                />
+                <span>USD</span>
+              </div>
+              <small>Modelled on entry and at expiration</small>
+            </label>
             <label className="scenario-field">
               <span>Scenario date</span>
               <input
@@ -645,12 +710,13 @@ function App() {
               })}>Use observed IV</button>
             )}
           </div>
-          <p className="scenario-note">Observed quotes and Greeks remain unchanged. These assumptions drive the separate modelled pre-expiry value below.</p>
+          <p className="scenario-note">Observed quotes and Greeks remain unchanged. Custom prices and commissions drive the separate modelled P&amp;L outputs below.</p>
         </section>
 
         <section className="position-summary" aria-label="Position summary details">
           <div><span className="section-label">Position summary</span><strong>{summary.legCount} leg{summary.legCount === 1 ? "" : "s"}</strong></div>
           <div><span className="section-label">{cashFlowLabel}</span><strong>{allLegsPriced ? money.format(Math.abs(summary.netCashFlow)) : "—"}</strong></div>
+          <div><span className="section-label">Entry commissions</span><strong>{allLegsPriced ? money.format(summary.entryCommission) : "—"}</strong></div>
           <span className="modelled-note">Modelled from recorded entry prices</span>
         </section>
 
@@ -680,6 +746,46 @@ function App() {
           <p className="greeks-note">Observed contract Greeks are signed by side and weighted by quantity × contract multiplier. They do not alter the modelled expiration payoff.</p>
         </section>
 
+        <section className="greeks-panel modelled-greeks-panel" aria-label="Modelled future Greeks">
+          <div className="greeks-heading">
+            <div><span className="section-label">Modelled future Greeks</span><strong>Position sensitivity at scenario date</strong></div>
+            <span className="greeks-status">
+              {modelledFutureGreeks.complete
+                ? `${scenarioDate} · 5.0% risk-free assumption`
+                : "Waiting for complete scenario inputs"}
+            </span>
+          </div>
+          <div className="greeks-grid">
+            <GreekMetric label="Delta" value={modelledFutureGreeks.delta} />
+            <GreekMetric label="Gamma" value={modelledFutureGreeks.gamma} />
+            <GreekMetric label="Theta / day" value={modelledFutureGreeks.theta} />
+            <GreekMetric label="Vega / 1%" value={modelledFutureGreeks.vega} />
+            <GreekMetric label="Rho / 1%" value={modelledFutureGreeks.rho} />
+          </div>
+          <p className="greeks-note">Black–Scholes-style estimates use the spot price, scenario date, each leg's observed or overridden IV, and the fixed educational rate. Values are modelled, signed, and weighted by quantity × contract multiplier; they are not observed broker Greeks.</p>
+        </section>
+
+        {mode === "fixture" && <section className="greeks-panel" aria-label="Fixture market events and liquidity overlay">
+          <div className="greeks-heading">
+            <div><span className="section-label">Fixture overlay</span><strong>Events and liquidity context</strong></div>
+            <span className="greeks-status">Synthetic context · {fixtureOverlay.symbol}</span>
+          </div>
+          <div className="scenario-model-grid">
+            <div className="greek-metric"><span>Liquidity band</span><strong>{fixtureOverlay.liquidity.tier}</strong></div>
+            <div className="greek-metric"><span>Spread band</span><strong>{fixtureOverlay.liquidity.spreadPercent.toFixed(1)}%</strong></div>
+            <div className="greek-metric"><span>Fixture volume</span><strong>{fixtureOverlay.liquidity.volume.toLocaleString("en-GB")}</strong></div>
+          </div>
+          <div className="overlay-events">
+            {fixtureOverlay.events.map((event) => (
+              <div className="overlay-event" key={event.id}>
+                <div><strong>{event.title}</strong><span>{formatOverlayDate(event.date)} · {event.kind} · {event.impact} impact</span></div>
+                <small>{event.description}</small>
+              </div>
+            ))}
+          </div>
+          <p className="greeks-note">Fixture-only context for interface testing. It is not a broker-observed quote, a live event calendar, a liquidity forecast, or modelled scenario output. Open interest band: {fixtureOverlay.liquidity.openInterest.toLocaleString("en-GB")}.</p>
+        </section>}
+
         <section className="scenario-model-panel" aria-label="Modelled pre-expiry scenario">
           <div className="greeks-heading">
             <div><span className="section-label">Modelled scenario</span><strong>Pre-expiry value at spot</strong></div>
@@ -690,7 +796,7 @@ function App() {
             <Metric label="Scenario date" value={scenarioDate || "—"} tone="neutral" />
             <Metric label="Model range" value={preExpiryProfile.length ? `${preExpiryProfile.length} points` : "—"} tone="neutral" />
           </div>
-          <p className="greeks-note">Black–Scholes-style option values use the recorded entry price, scenario date, each leg's observed or overridden IV, and the fixed educational rate assumption. This is modelled output, not an observed quote or future-date Greek.</p>
+          <p className="greeks-note">Black–Scholes-style option values use the recorded or custom entry price, scenario date, each leg's observed or overridden IV, and the fixed educational rate assumption. This is modelled output, not an observed quote or future-date Greek.</p>
         </section>
 
         <section className="chart-panel">
@@ -720,7 +826,7 @@ function App() {
                 <button className="leg-select" onClick={() => setActiveLegId(positionLeg.id)} aria-pressed={positionLeg.id === activeLeg.id}>
                   <div className={`leg-side ${positionLeg.side}`}>{positionLeg.side === "buy" ? "BTO" : "STO"}</div>
                   <div className="leg-main"><strong>{symbol} {positionLeg.strike || "—"}{positionLeg.type === "call" ? "C" : "P"}</strong><span>{positionLeg.expiry || "—"} · {positionLeg.quantity} contract{positionLeg.quantity === 1 ? "" : "s"}</span></div>
-                  <div className="leg-price"><span>Entry price · {pricingModeLabel.toLowerCase()}</span><strong>{positionLeg.priceLoaded ? price.format(positionEntryPrice) : "—"}</strong><span className="leg-delta">Delta {formatDelta(positionDelta)}</span></div>
+                  <div className="leg-price"><span>Entry price · {positionLeg.customPrice != null ? "custom" : pricingModeLabel.toLowerCase()}</span><strong>{positionLeg.priceLoaded ? price.format(positionEntryPrice) : "—"}</strong><span className="leg-delta">Delta {formatDelta(positionDelta)}</span></div>
                 </button>
                 <div className="leg-actions">
                   <button className="button subtle" onClick={() => switchType(positionLeg)} disabled={!chain}>Switch to {positionLeg.type === "call" ? "put" : "call"}</button>
@@ -731,7 +837,7 @@ function App() {
           })}
           <button className="button subtle add-leg" onClick={addLeg}>+ Add leg</button>
         </section>
-        <div className="data-context">Observed market data: {context?.source ?? mode}, {freshness}, observed {observedAt}, pricing mode {formatPricingMode(observedPricingMode)}. Modelled scenario: pre-expiry value uses scenario date and per-leg IV; expiration chart remains intrinsic value.</div>
+        <div className="data-context">Observed market data: {context?.source ?? mode}, {freshness}, observed {observedAt}, pricing mode {formatPricingMode(observedPricingMode)}. Modelled assumptions: {legs.filter((leg) => leg.customPrice != null).length} custom price override{legs.filter((leg) => leg.customPrice != null).length === 1 ? "" : "s"}, ${commissionPerContract.toFixed(2)} commission per contract on entry and expiration.</div>
           </div>
         )}
       </section>
@@ -835,13 +941,29 @@ function nextLegId(legs: readonly Leg[]): string {
   return `leg-${index}`;
 }
 
-function calculateBreakeven(leg: Leg): number {
-  if (leg.type === "call") return leg.side === "buy" ? leg.strike + leg.price : leg.strike - leg.price;
-  return leg.side === "buy" ? leg.strike - leg.price : leg.strike + leg.price;
+function resetLegQuote(leg: Leg, clearCustomPrice = false): Leg {
+  const customPrice = clearCustomPrice ? null : leg.customPrice ?? null;
+  return {
+    ...leg,
+    observedPrice: null,
+    customPrice,
+    price: customPrice ?? 0,
+    priceLoaded: customPrice != null
+  };
+}
+
+function calculateBreakeven(leg: Leg, commissionPerContract: number): number {
+  const commissionPerShare = (commissionPerContract * 2) / leg.multiplier;
+  if (leg.type === "call") return leg.side === "buy" ? leg.strike + leg.price + commissionPerShare : leg.strike + leg.price - commissionPerShare;
+  return leg.side === "buy" ? leg.strike - leg.price - commissionPerShare : leg.strike - leg.price + commissionPerShare;
 }
 
 function formatExpiry(value: string): string {
   return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "2-digit" }).format(new Date(`${value}T00:00:00Z`));
+}
+
+function formatOverlayDate(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00Z`));
 }
 
 function contextDate(context: { observed_at?: string } | null): string {
@@ -889,7 +1011,9 @@ function formatSavedProvenance(strategy: SavedStrategy): string {
 function formatSavedAssumptions(strategy: SavedStrategy): string {
   const scenarioDate = strategy.assumptions.scenarioDate || "no scenario date";
   const overrideCount = Object.keys(strategy.assumptions.impliedVolatilityOverrides).length;
-  return `Scenario ${scenarioDate} · ${overrideCount} IV override${overrideCount === 1 ? "" : "s"}`;
+  const customPriceCount = strategy.legs.filter((leg) => leg.customPrice != null).length;
+  const commission = strategy.assumptions.commissionPerContract ?? 0;
+  return `Scenario ${scenarioDate} · ${customPriceCount} custom price${customPriceCount === 1 ? "" : "s"} · ${overrideCount} IV override${overrideCount === 1 ? "" : "s"} · $${commission.toFixed(2)}/contract`;
 }
 
 function Metric({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone: "neutral" | "loss" | "profit" }) {
