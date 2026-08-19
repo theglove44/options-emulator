@@ -30,9 +30,12 @@
 
 ## Later
 
-- [ ] Net and future Greeks.
-- [ ] Commissions and custom prices.
-- [ ] Market events and liquidity overlays.
+- [x] Add modelled net and future Greeks using scenario date, per-leg IV, side,
+  quantity, and contract multiplier, separate from observed broker Greeks.
+- [x] Add custom entry prices and flat educational per-contract commissions,
+  preserving observed quotes and saved-strategy assumptions.
+- [x] Add deterministic fixture-only market event and liquidity overlays with
+  explicit synthetic-data labelling.
 - [ ] Historical IV and saved-trade tracking.
 - [ ] Optimizer.
 - [ ] Separate flow-data investigation.
