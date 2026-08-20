@@ -9,6 +9,10 @@ BACKEND_PYTHON="$BACKEND_DIR/.venv/bin/python"
 BACKEND_PID=""
 FRONTEND_PID=""
 
+BACKEND_PORT="$(python3 "$PROJECT_ROOT/scripts/choose_port.py" "${OPTION_EMULATOR_BACKEND_PORT:-8765}")"
+FRONTEND_PORT="$(python3 "$PROJECT_ROOT/scripts/choose_port.py" "${OPTION_EMULATOR_FRONTEND_PORT:-5173}")"
+FRONTEND_URL="http://127.0.0.1:$FRONTEND_PORT"
+
 cleanup() {
   trap - INT TERM EXIT
   if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
@@ -34,14 +38,21 @@ if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
 fi
 
 echo "Starting Option Emulator in fixture mode..."
+if [[ "$BACKEND_PORT" != "${OPTION_EMULATOR_BACKEND_PORT:-8765}" ]]; then
+  echo "Backend port ${OPTION_EMULATOR_BACKEND_PORT:-8765} is busy; using $BACKEND_PORT."
+fi
+if [[ "$FRONTEND_PORT" != "${OPTION_EMULATOR_FRONTEND_PORT:-5173}" ]]; then
+  echo "Frontend port ${OPTION_EMULATOR_FRONTEND_PORT:-5173} is busy; using $FRONTEND_PORT."
+fi
 (
   cd "$BACKEND_DIR"
   PYTHONPATH=src MARKET_DATA_MODE=fixture "$BACKEND_PYTHON" -m uvicorn \
-    options_emulator.api:app --host 127.0.0.1 --port 8765
+    options_emulator.api:app --host 127.0.0.1 --port "$BACKEND_PORT"
 ) &
 BACKEND_PID=$!
 
-npm --prefix "$FRONTEND_DIR" run dev -- --host 127.0.0.1 --configLoader runner &
+VITE_BACKEND_PORT="$BACKEND_PORT" npm --prefix "$FRONTEND_DIR" run dev -- \
+  --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort --configLoader runner &
 FRONTEND_PID=$!
 
 for _ in {1..50}; do
@@ -49,11 +60,11 @@ for _ in {1..50}; do
     echo "A local server stopped before Option Emulator became ready." >&2
     exit 1
   fi
-  if curl --silent --fail http://127.0.0.1:8765/api/health >/dev/null \
-    && curl --silent --fail http://127.0.0.1:5173/ >/dev/null; then
-    echo "Option Emulator is ready at http://127.0.0.1:5173"
+  if curl --silent --fail "http://127.0.0.1:$BACKEND_PORT/api/health" >/dev/null \
+    && curl --silent --fail "$FRONTEND_URL/" >/dev/null; then
+    echo "Option Emulator is ready at $FRONTEND_URL"
     if [[ "${OPTION_EMULATOR_OPEN_BROWSER:-1}" != "0" ]] && command -v open >/dev/null 2>&1; then
-      open http://127.0.0.1:5173
+      open "$FRONTEND_URL"
     fi
     wait
     exit 0
