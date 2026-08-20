@@ -41,10 +41,14 @@ echo "Starting Option Emulator in fixture mode..."
 ) &
 BACKEND_PID=$!
 
-npm --prefix "$FRONTEND_DIR" run dev -- --host 127.0.0.1 &
+npm --prefix "$FRONTEND_DIR" run dev -- --host 127.0.0.1 --configLoader runner &
 FRONTEND_PID=$!
 
 for _ in {1..50}; do
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null || ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    echo "A local server stopped before Option Emulator became ready." >&2
+    exit 1
+  fi
   if curl --silent --fail http://127.0.0.1:8765/api/health >/dev/null \
     && curl --silent --fail http://127.0.0.1:5173/ >/dev/null; then
     echo "Option Emulator is ready at http://127.0.0.1:5173"
