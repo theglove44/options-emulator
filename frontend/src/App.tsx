@@ -5,11 +5,13 @@ import { initialLeg } from "./mockData";
 import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeModelledGreeks, summarizeObservedGreeks, summarizePosition } from "./position";
 import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
 import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
-import { clampScenarioDate, formatVolatilityPercent, parseVolatilityPercent } from "./scenario";
+import { clampScenarioDate, formatVolatilityPercent } from "./scenario";
 import { deleteSavedStrategy, listSavedStrategies, saveStrategy } from "./savedStrategies";
 import type { SavedStrategy } from "./savedStrategies";
 import type { Leg } from "./types";
 import { getFixtureMarketOverlay } from "./marketOverlay";
+import { commitNumericDraft, formatDraft } from "./numericDraft";
+import { applyObservedPrices } from "./quoteState";
 
 const money = new Intl.NumberFormat("en-GB", {
   style: "currency",
@@ -38,6 +40,9 @@ function App() {
   const [mode, setMode] = useState<"fixture" | "tastytrade">("fixture");
   const [pricingMode, setPricingMode] = useState<PricingMode>("midpoint");
   const [commissionPerContract, setCommissionPerContract] = useState(0);
+  const [commissionDraft, setCommissionDraft] = useState("0.00");
+  const [customPriceDraft, setCustomPriceDraft] = useState("");
+  const [volatilityDraft, setVolatilityDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
@@ -90,7 +95,7 @@ function App() {
       try {
         const [nextChain, quotes, health] = await Promise.all([
           fetchChain(requestedSymbol),
-          fetchQuotes([requestedSymbol], pricingMode),
+          fetchQuotes([requestedSymbol], "midpoint"),
           fetchHealth()
         ]);
         if (cancelled) return;
@@ -131,7 +136,7 @@ function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [pricingMode, refreshToken, symbol]);
+  }, [refreshToken, symbol]);
 
   useEffect(() => {
     if (!chain) return;
@@ -202,14 +207,12 @@ function App() {
       .then((quotes) => {
         if (cancelled) return;
         setOptionResponse(quotes);
-        setLegs((current) => current.map((item) => {
-          const contract = findContract(chain, item);
-          const quote = contract ? findQuote(quotes, contract.symbol) : null;
-          if (quote?.selected_price == null) return item;
-          return item.customPrice != null
-            ? { ...item, observedPrice: quote.selected_price, price: item.customPrice, priceLoaded: true }
-            : { ...item, observedPrice: quote.selected_price, price: quote.selected_price, priceLoaded: true };
-        }));
+        const selectedPrices = Object.fromEntries(quotes.items.map((quote) => [quote.symbol, quote.selected_price]));
+        setLegs((current) => applyObservedPrices(
+          current,
+          selectedPrices,
+          (item) => findContract(chain, item)?.symbol ?? null
+        ));
       })
       .catch((caught) => {
         if (!cancelled) setError(caught instanceof Error ? caught.message : "Option quote could not be loaded");
@@ -286,6 +289,14 @@ function App() {
     setScenarioDate((current) => clampScenarioDate(current || scenarioMinimumDate, scenarioMinimumDate, scenarioMaximumDate));
   }, [scenarioMinimumDate, scenarioMaximumDate]);
 
+  useEffect(() => {
+    setCustomPriceDraft(formatDraft(activeLeg.customPrice ?? null));
+  }, [activeLeg.id, activeLeg.customPrice]);
+
+  useEffect(() => {
+    setVolatilityDraft(formatDraft(scenarioImpliedVolatility == null ? null : scenarioImpliedVolatility * 100, 1));
+  }, [activeContract?.symbol, scenarioImpliedVolatility]);
+
   function updateActiveLeg(update: Partial<Leg>) {
     const nextLeg = { ...activeLeg, ...update };
     setLegs((current) => current.map((item) => item.id === activeLeg.id ? nextLeg : item));
@@ -295,12 +306,8 @@ function App() {
   function choosePricingMode(nextPricingMode: PricingMode) {
     if (nextPricingMode === pricingMode) return;
     setPricingMode(nextPricingMode);
-    setUnderlyingResponse(null);
-    setUnderlyingQuote(null);
     setOptionResponse(null);
-    setSpot(null);
     setLegs((current) => current.map((item) => resetLegQuote(item)));
-    setLoading(true);
   }
 
   function commitSymbol(nextValue = symbolInput) {
@@ -370,16 +377,34 @@ function App() {
     setSelectedTemplateId("custom");
   }
 
-  function updateCustomEntryPrice(value: string) {
-    if (!value.trim()) {
+  function commitCustomEntryPrice() {
+    const committed = commitNumericDraft(customPriceDraft, activeLeg.customPrice ?? null, { minimum: 0, allowEmpty: true });
+    setCustomPriceDraft(committed.draft);
+    if (!committed.accepted) return;
+    if (committed.value == null) {
       const observedPrice = activeLeg.observedPrice ?? null;
       updateActiveLeg({ customPrice: null, price: observedPrice ?? 0, priceLoaded: observedPrice != null });
       return;
     }
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      updateActiveLeg({ customPrice: parsed, price: parsed, priceLoaded: true });
-    }
+    updateActiveLeg({ customPrice: committed.value, price: committed.value, priceLoaded: true });
+  }
+
+  function commitCommission() {
+    const committed = commitNumericDraft(commissionDraft, commissionPerContract, { minimum: 0 });
+    setCommissionDraft(committed.draft);
+    if (committed.accepted && committed.value != null) setCommissionPerContract(committed.value);
+  }
+
+  function commitVolatility() {
+    if (!activeContract) return;
+    const fallback = scenarioImpliedVolatility == null ? null : scenarioImpliedVolatility * 100;
+    const committed = commitNumericDraft(volatilityDraft, fallback, { minimum: 0.1, maximum: 500 });
+    setVolatilityDraft(committed.draft);
+    if (!committed.accepted || committed.value == null) return;
+    setImpliedVolatilityOverrides((current) => ({
+      ...current,
+      [activeContract.symbol]: committed.value! / 100
+    }));
   }
 
   function removeLeg(legId: string = activeLeg.id) {
@@ -447,6 +472,7 @@ function App() {
     setScenarioDate(saved.assumptions.scenarioDate);
     setImpliedVolatilityOverrides({ ...saved.assumptions.impliedVolatilityOverrides });
     setCommissionPerContract(saved.assumptions.commissionPerContract ?? 0);
+    setCommissionDraft((saved.assumptions.commissionPerContract ?? 0).toFixed(2));
     setChain(null);
     setUnderlyingResponse(null);
     setUnderlyingQuote(null);
@@ -551,7 +577,7 @@ function App() {
           </label>
           <div className="spot-price">
             {spot != null ? price.format(spot) : "—"}
-            <span className="spot-detail">{underlyingQuote?.selected_price != null ? `${pricingModeLabel} ${price.format(underlyingQuote.selected_price)}` : "Loading quote"}</span>
+            <span className="spot-detail">{underlyingQuote?.selected_price != null ? `Reference ${price.format(underlyingQuote.selected_price)}` : "Loading quote"}</span>
           </div>
           <span className="data-badge">{mode} • {freshness}</span>
           <label className="pricing-field">
@@ -606,6 +632,22 @@ function App() {
           <div className="strike-context"><span>{strikeContracts.length ? `${strikeContracts.length} available strikes` : "—"}</span><span className="spot-marker">{symbol} {spot != null ? spot.toFixed(2) : "—"}</span></div>
         </section>
 
+        <section className="greeks-panel contract-greeks-panel" aria-label="Selected contract observed quote and Greeks">
+          <div className="greeks-heading">
+            <div><span className="section-label">Selected contract</span><strong>{activeContract ? `${activeContract.strike}${activeContract.option_type === "call" ? "C" : "P"} · ${activeContract.expiration_date}` : "No contract"}</strong></div>
+            <span className="greeks-status">{activeOptionQuote?.selected_price == null ? "Observed quote loading" : `${pricingModeLabel} ${price.format(activeOptionQuote.selected_price)}`}</span>
+          </div>
+          <div className="greeks-grid">
+            <PreciseGreekMetric label="IV" value={activeOptionQuote?.greeks?.implied_volatility ?? null} percent />
+            <PreciseGreekMetric label="Delta" value={activeOptionQuote?.greeks?.delta ?? null} />
+            <PreciseGreekMetric label="Gamma" value={activeOptionQuote?.greeks?.gamma ?? null} />
+            <PreciseGreekMetric label="Theta" value={activeOptionQuote?.greeks?.theta ?? null} />
+            <PreciseGreekMetric label="Vega" value={activeOptionQuote?.greeks?.vega ?? null} />
+            <PreciseGreekMetric label="Rho" value={activeOptionQuote?.greeks?.rho ?? null} />
+          </div>
+          <p className="greeks-note">Observed fixture contract identity and source timestamp. Scenario IV and date controls do not change these values.</p>
+        </section>
+
         <section className="scenario-section" aria-label="Modelled entry assumptions">
           <div className="scenario-heading">
             <div><span className="section-label">Modelled entry assumptions</span><strong>Recorded assumptions</strong></div>
@@ -618,8 +660,10 @@ function App() {
                 type="number"
                 min="0"
                 step="0.01"
-                value={activeLeg.customPrice == null ? "" : activeLeg.customPrice}
-                onChange={(event) => updateCustomEntryPrice(event.target.value)}
+                value={customPriceDraft}
+                onChange={(event) => setCustomPriceDraft(event.target.value)}
+                onBlur={commitCustomEntryPrice}
+                onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitCustomEntryPrice(); event.currentTarget.blur(); } }}
                 placeholder={activeLeg.observedPrice == null ? "—" : activeLeg.observedPrice.toFixed(2)}
                 aria-label="Active leg custom entry price"
                 disabled={!activeContract}
@@ -631,7 +675,7 @@ function App() {
               </small>
             </label>
             {activeLeg.customPrice != null && (
-              <button className="button subtle scenario-reset" onClick={() => updateCustomEntryPrice("")}>Use observed price</button>
+              <button className="button subtle scenario-reset" onClick={() => { setCustomPriceDraft(""); const observedPrice = activeLeg.observedPrice ?? null; updateActiveLeg({ customPrice: null, price: observedPrice ?? 0, priceLoaded: observedPrice != null }); }}>Use observed price</button>
             )}
             <label className="scenario-field">
               <span>Commission / contract</span>
@@ -640,11 +684,10 @@ function App() {
                   type="number"
                   min="0"
                   step="0.01"
-                  value={commissionPerContract.toFixed(2)}
-                  onChange={(event) => {
-                    const parsed = Number(event.target.value);
-                    if (Number.isFinite(parsed) && parsed >= 0) setCommissionPerContract(parsed);
-                  }}
+                  value={commissionDraft}
+                  onChange={(event) => setCommissionDraft(event.target.value)}
+                  onBlur={commitCommission}
+                  onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitCommission(); event.currentTarget.blur(); } }}
                   aria-label="Commission per contract"
                 />
                 <span>USD</span>
@@ -679,17 +722,10 @@ function App() {
                   min="0.1"
                   max="500"
                   step="0.1"
-                  value={scenarioImpliedVolatility == null ? "" : (scenarioImpliedVolatility * 100).toFixed(1)}
-                  onChange={(event) => {
-                    if (!activeContract) return;
-                    const parsed = parseVolatilityPercent(event.target.value);
-                    setImpliedVolatilityOverrides((current) => {
-                      const next = { ...current };
-                      if (parsed == null) delete next[activeContract.symbol];
-                      else next[activeContract.symbol] = parsed;
-                      return next;
-                    });
-                  }}
+                  value={volatilityDraft}
+                  onChange={(event) => setVolatilityDraft(event.target.value)}
+                  onBlur={commitVolatility}
+                  onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commitVolatility(); event.currentTarget.blur(); } }}
                   placeholder="—"
                   aria-label="Active leg implied volatility percentage"
                   disabled={!activeContract}
@@ -1022,6 +1058,15 @@ function Metric({ label, value, detail, tone }: { label: string; value: string; 
 
 function GreekMetric({ label, value }: { label: string; value: number | null }) {
   return <div className="greek-metric"><span>{label}</span><strong>{formatGreek(value)}</strong></div>;
+}
+
+function PreciseGreekMetric({ label, value, percent = false }: { label: string; value: number | null; percent?: boolean }) {
+  const display = value == null
+    ? "—"
+    : percent
+      ? `${(value * 100).toFixed(2)}%`
+      : `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
+  return <div className="greek-metric"><span>{label}</span><strong>{display}</strong></div>;
 }
 
 type GraphPoint = { price: number; pnl: number };

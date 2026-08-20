@@ -36,6 +36,8 @@
   preserving observed quotes and saved-strategy assumptions.
 - [x] Add deterministic fixture-only market event and liquidity overlays with
   explicit synthetic-data labelling.
+- [x] Repair fixture-alpha expiry identity, coherent option quote/Greek variation,
+  visible bid/midpoint/ask state transitions, and draft-safe numeric inputs.
 - [ ] Historical IV and saved-trade tracking.
 - [ ] Optimizer.
 - [ ] Separate flow-data investigation.

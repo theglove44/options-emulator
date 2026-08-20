@@ -20,6 +20,19 @@ docs/      Product specification, architecture, and backlog
 
 ## Local development
 
+From the project root, the normal fixture-alpha test launch is one command:
+
+```bash
+./start_app.sh
+```
+
+The launcher prepares missing local dependencies, starts the backend and
+frontend together, opens `http://127.0.0.1:5173`, and stops both processes when
+you press `Ctrl+C`. It explicitly uses fixture mode and does not load live
+tastytrade credentials.
+
+The separate commands below remain available for backend or frontend debugging.
+
 ### Backend
 
 ```bash

@@ -15,6 +15,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
+from itertools import pairwise
+from math import erf, exp, log, pi, sqrt
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
@@ -348,10 +350,72 @@ def _fixture_option_symbol(
     return occ, streamer
 
 
-def _fixture_delta(profile: FixtureProfile, strike: float, option_type: str) -> float:
-    """Return a deterministic, strike-sensitive Greek for fixture mode."""
-    call_delta = max(0.05, min(0.95, 0.56 - (strike - profile.spot) / 45))
-    return round(call_delta if option_type == "call" else call_delta - 1, 2)
+def _fixture_strikes(profile: FixtureProfile, expiration_index: int) -> tuple[float, ...]:
+    """Keep useful common strikes while making every fixture expiry distinct."""
+    base = profile.strikes
+    step = min(right - left for left, right in pairwise(base))
+    variants = (
+        (base[0] - step, *base[1:]),
+        (*base[:-1], base[-1] + step),
+        (base[0], base[1] - step / 2, *base[2:]),
+        (*base[:4], base[4] + step / 2, base[5]),
+        (base[0] - step / 2, *base[1:5], base[5] + step / 2),
+        (base[0], base[1], base[2] - step / 2, *base[3:]),
+    )
+    return tuple(round(value, 2) for value in variants[expiration_index % len(variants)])
+
+
+def _normal_cdf(value: float) -> float:
+    return 0.5 * (1 + erf(value / sqrt(2)))
+
+
+def _fixture_option_metrics(
+    profile: FixtureProfile,
+    expiry: date,
+    strike: float,
+    option_type: str,
+    observed_date: date,
+) -> tuple[float, GreekSnapshot]:
+    """Return coherent Black-Scholes-style fixture values and observed Greeks."""
+    days = max((expiry - observed_date).days, 1)
+    years = days / 365
+    moneyness = (strike - profile.spot) / profile.spot
+    expiry_index = FIXTURE_EXPIRATIONS.index(expiry) if expiry in FIXTURE_EXPIRATIONS else 0
+    volatility = max(0.18, 0.38 + 0.025 * expiry_index + 0.22 * abs(moneyness))
+    rate = 0.05
+    root_time = sqrt(years)
+    d1 = (log(profile.spot / strike) + (rate + volatility**2 / 2) * years) / (
+        volatility * root_time
+    )
+    d2 = d1 - volatility * root_time
+    discount = exp(-rate * years)
+    density = exp(-(d1**2) / 2) / sqrt(2 * pi)
+    if option_type == "call":
+        value = profile.spot * _normal_cdf(d1) - strike * discount * _normal_cdf(d2)
+        delta = _normal_cdf(d1)
+        theta = (
+            -(profile.spot * density * volatility) / (2 * root_time)
+            - rate * strike * discount * _normal_cdf(d2)
+        ) / 365
+        rho = strike * years * discount * _normal_cdf(d2) / 100
+    else:
+        value = strike * discount * _normal_cdf(-d2) - profile.spot * _normal_cdf(-d1)
+        delta = _normal_cdf(d1) - 1
+        theta = (
+            -(profile.spot * density * volatility) / (2 * root_time)
+            + rate * strike * discount * _normal_cdf(-d2)
+        ) / 365
+        rho = -strike * years * discount * _normal_cdf(-d2) / 100
+    gamma = density / (profile.spot * volatility * root_time)
+    vega = profile.spot * density * root_time / 100
+    return round(max(value, 0.01), 2), GreekSnapshot(
+        implied_volatility=round(volatility, 4),
+        delta=round(delta, 4),
+        gamma=round(gamma, 4),
+        theta=round(theta, 4),
+        rho=round(rho, 4),
+        vega=round(vega, 4),
+    )
 
 
 class FixtureMarketDataAdapter:
@@ -385,10 +449,10 @@ class FixtureMarketDataAdapter:
         observed_at = utc_now()
         observed_date = observed_at.date()
         expirations: list[ChainExpiration] = []
-        for expiry in FIXTURE_EXPIRATIONS:
+        for expiration_index, expiry in enumerate(FIXTURE_EXPIRATIONS):
             days = max((expiry - observed_date).days, 0)
             contracts: list[OptionContract] = []
-            for strike in profile.strikes:
+            for strike in _fixture_strikes(profile, expiration_index):
                 for option_type in ("call", "put"):
                     occ, streamer = _fixture_option_symbol(underlying, expiry, option_type, strike)
                     contracts.append(
@@ -430,15 +494,17 @@ class FixtureMarketDataAdapter:
             metadata = _parse_option_symbol(symbol)
             if metadata:
                 profile = _fixture_profile(metadata["underlying_symbol"])
-                intrinsic = (
-                    max(profile.spot - metadata["strike"], 0)
-                    if metadata["option_type"] == "call"
-                    else max(metadata["strike"] - profile.spot, 0)
+                premium, greeks = _fixture_option_metrics(
+                    profile,
+                    metadata["expiration_date"],
+                    metadata["strike"],
+                    metadata["option_type"],
+                    now.date(),
                 )
-                premium = intrinsic + (0.90 if metadata["option_type"] == "call" else 0.80)
+                spread = max(0.08, min(0.30, premium * 0.08))
                 bid, ask, last = (
-                    round(max(premium - 0.05, 0), 2),
-                    round(premium + 0.05, 2),
+                    round(max(premium - spread / 2, 0.01), 2),
+                    round(premium + spread / 2, 2),
                     round(premium, 2),
                 )
                 _, streamer = _fixture_option_symbol(
@@ -463,14 +529,7 @@ class FixtureMarketDataAdapter:
                     selected_price=_select_price(bid, ask, last, pricing_mode),
                     volume=1250,
                     open_interest=4820,
-                    greeks=GreekSnapshot(
-                        implied_volatility=0.45,
-                        delta=_fixture_delta(profile, metadata["strike"], metadata["option_type"]),
-                        gamma=0.12,
-                        theta=-0.04,
-                        rho=0.02 if metadata["option_type"] == "call" else -0.02,
-                        vega=0.08,
-                    ),
+                    greeks=greeks,
                     observed_at=now,
                 )
             else:
