@@ -1,5 +1,4 @@
-import type { Leg, ProfilePoint } from "./types";
-import { buildPositionProfile } from "./position";
+import type { Leg } from "./types";
 import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate } from "./strategyTemplates";
 
 const defaultTemplate = getStrategyTemplate(DEFAULT_STRATEGY_TEMPLATE_ID);
@@ -15,7 +14,3 @@ export const initialLeg: Leg = {
   priceLoaded: false,
   multiplier: 100
 };
-
-export function buildProfile(leg: Leg, spot: number): ProfilePoint[] {
-  return buildPositionProfile([leg], spot);
-}

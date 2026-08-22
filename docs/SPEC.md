@@ -34,34 +34,34 @@ Acceptance criteria:
 - Explicit data timestamp and delayed/stale status.
 - Read-only authenticated smoke test.
 
-## Milestone 2: useful strategy builder
+## Milestone 2: useful strategy builder — current fixture slice
 
 - Long call, long put, call/put credit spreads, long/short strangles, straddles, iron condors, calendars, and diagonals.
 - Add/remove/reorder legs.
 - Underlying stock legs.
 - Multiple expirations for calendars and diagonals.
 - Aggregate Greeks with documented units.
-- Pre-expiry scenario pricing using an explicit model and per-leg IV.
+- Pre-expiry scenario pricing using an explicit model and per-leg IV, labelled
+  separately from observed market data.
 - Table and graph display modes.
 - Local saved strategies.
 
-Scenario date and implied-volatility controls are recorded separately from
-observed quotes in the current builder, but do not alter the expiration-only
-payoff until the later pre-expiry pricing model is deliberately implemented.
+The current builder also keeps observed broker Greeks separate from modelled
+future Greeks, preserves custom entry prices and educational commissions as
+modelled assumptions, and labels fixture-only market overlays as synthetic.
+Scenario date and implied-volatility controls drive the separate pre-expiry
+modelled output; the expiration payoff remains an intrinsic-value calculation.
 
 Local saved strategies use browser-local versioned JSON. A saved snapshot
 contains the explicit legs, pricing mode, observed-data provenance and recorded
 scenario assumptions; loading refreshes the read-only market-data context and
 does not perform an account or order operation.
 
-## Milestone 3: analysis tools
+## Remaining analysis work
 
-- Volatility and price sliders.
-- Future-date Greeks.
-- Commissions and custom entry prices.
 - Historical IV and saved-trade tracking.
-- Market events and earnings context.
-- Liquidity/volume overlays.
+- Optimizer.
+- Separate flow-data investigation.
 
 ## Later, separate data products
 

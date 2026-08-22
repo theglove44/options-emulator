@@ -142,8 +142,9 @@ cash-flow and expiration payoff summaries, recorded scenario assumptions, and
 the signed, zoomable graph/table display are verified in the current builder.
 Local saved strategies are also verified in fixture mode with browser-local JSON
 persistence and explicit load/delete controls. Remaining builder work is listed
-in [docs/BACKLOG.md](docs/BACKLOG.md), including pre-expiry modelling. The table
-view remains expiration-only until a pre-expiry pricing model is implemented.
+in [docs/BACKLOG.md](docs/BACKLOG.md), including historical IV and saved-trade
+tracking. The payoff table remains expiration-focused; pre-expiry modelled P&L
+is shown separately with its recorded assumptions.
 
 The existing authenticated live smoke-test record is in
 [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md); this checkout did not have the private
