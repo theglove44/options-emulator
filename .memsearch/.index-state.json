@@ -1,0 +1,18 @@
+{
+  "collection": "ms_options_emulator_28a0e0bc",
+  "failed_files": [],
+  "indexed_chunks": 2,
+  "indexed_files": 1,
+  "last_completed_at": "2026-08-21T07:21:09.355464Z",
+  "last_started_at": "2026-08-21T07:21:02.372199Z",
+  "last_success_at": "2026-08-21T07:21:09.355464Z",
+  "milvus_uri": "~/.memsearch/milvus.db",
+  "operation": "index",
+  "paths": [
+    "/Users/christaylor/Projects/options-emulator/.memsearch/memory"
+  ],
+  "schema_version": 1,
+  "status": "ok",
+  "total_files": 1,
+  "updated_at": "2026-08-21T07:21:09.355464Z"
+}
