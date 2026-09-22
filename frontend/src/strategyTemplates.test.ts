@@ -110,6 +110,49 @@ describe("strategy template registry", () => {
     expect(resolveStrategyTemplateContracts({ ...expiry, contracts: expiry.contracts.filter((contract) => contract.strike <= 14) }, STRATEGY_TEMPLATES["vertical-spread"], 14.18)).toBeNull();
   });
 
+  it("builds a spread from the requested short delta and numeric width", () => {
+    const deltaBySymbol = new Map([
+      ["12call", 0.72],
+      ["13call", 0.51],
+      ["14call", 0.31],
+      ["15call", 0.19],
+      ["16call", 0.09],
+      ["17call", 0.04]
+    ]);
+
+    const contracts = resolveStrategyTemplateContractsForChain(
+      [expiry],
+      STRATEGY_TEMPLATES["call-credit-spread"],
+      14.18,
+      expiry.expiration_date,
+      { targetDelta: 0.3, strikeWidth: 2, deltaBySymbol }
+    );
+
+    expect(contracts?.map((contract) => `${contract.strike}${contract.option_type}`)).toEqual([
+      "14call",
+      "16call"
+    ]);
+  });
+
+  it("uses the requested target delta for a strategy without short legs", () => {
+    const deltaBySymbol = new Map([
+      ["12call", 0.72],
+      ["13call", 0.51],
+      ["14call", 0.31],
+      ["15call", 0.19]
+    ]);
+
+    const contracts = resolveStrategyTemplateContractsForChain(
+      [expiry],
+      STRATEGY_TEMPLATES["long-call"],
+      14.18,
+      expiry.expiration_date,
+      { targetDelta: 0.2, deltaBySymbol }
+    );
+
+    expect(contracts?.map((contract) => `${contract.strike}${contract.option_type}`)).toEqual(["15call"]);
+  });
+
   it("resolves near and far expiries for calendar and diagonal spreads", () => {
     const farExpiry = {
       ...expiry,

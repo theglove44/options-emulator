@@ -38,6 +38,11 @@ checks `/api/health` plus the frontend root before reporting readiness. There is
 no worker, job queue, database, container configuration, CI workflow, or
 deployment target in this repository.
 
+If the local Python environment or frontend packages are missing, the launcher
+also runs `pip install` and `npm ci` before starting the servers. That setup step
+can contact the configured Python and npm package registries; it is separate
+from the running fixture application, which remains local.
+
 ## Backend components
 
 ### `backend/src/options_emulator/api.py`
@@ -67,13 +72,15 @@ delayed/stale state, pricing mode, notes, contract identity, bid/ask/midpoint,
 last price, selected price, volume, open interest, and available Greeks together.
 
 `FixtureMarketDataAdapter` generates deterministic symbol-specific chains,
-quotes, and Greek snapshots. It is the safe default and does not contact a
-broker.
+quotes, and Greek snapshots. Its option values and Greeks come from a local
+Black–Scholes-style fixture calculation with a fixed 5% rate. It is the safe
+default and does not contact a broker.
 
 `TastytradeMarketDataAdapter` imports the tastytrade SDK lazily. When explicitly
 selected, it uses the SDK session, symbol search, option-chain retrieval,
 one-shot market data, and DXLink Greeks. Missing credentials raise
 `MarketDataNotConfigured`; the adapter does not import account or order APIs.
+Large live option requests are split into provider-safe batches of 50 contracts.
 
 ### `backend/src/options_emulator/domain.py`
 
@@ -131,9 +138,21 @@ aggregate outputs when required inputs are incomplete.
 Black–Scholes-style option values, and Greeks using the fixed educational 5%
 risk-free rate. These are modelled estimates, not broker observations.
 
-The frontend calculation path is separate from the backend `domain.py` and
-`/api/payoff` path. They currently duplicate some financial authority and must
-retain matching cash-flow, call/put, multiplier, and extrema conventions.
+`frontend/src/App.tsx` still owns the single-leg breakeven formula and derives
+the visible sampled maximum and minimum from profiles returned by `position.ts`.
+
+### Calculation boundaries
+
+| Calculation path | Job | Current consumer |
+| --- | --- | --- |
+| `market_data.py` fixture maths | Generates deterministic quote prices and observed-style fixture Greeks | Fixture API responses |
+| `domain.py` through `/api/payoff` | Calculates a standalone one-leg expiration profile | API tests and direct API callers; not the React UI |
+| `position.ts`, `scenario.ts`, and small helpers in `App.tsx` | Calculates the active builder's cash flow, expiration and pre-expiry P&L, Greeks, breakeven, and chart values | Visible React interface |
+
+These paths serve different purposes, but they repeat financial conventions and
+some Black–Scholes/normal-CDF maths. A change to call/put handling, multipliers,
+rates, commissions, or extrema therefore needs focused tests in every affected
+path rather than an assumption that one shared engine covers them all.
 
 ### Templates, quote state, and fixture overlays
 
@@ -161,9 +180,11 @@ broker-observed data, forecasts, or scenario output.
    normalised Pydantic contract.
 5. `App.tsx` reconciles each leg against loaded contracts and requests option
    quotes using the selected midpoint/bid/ask/last mode.
-6. Quote state stores observed prices and provenance. `position.ts` and
+6. The strike picker shows the observed 10-delta to 90-delta window after
+   quotes load, with a small near-spot preview while live data is loading.
+7. Quote state stores observed prices and provenance. `position.ts` and
    `scenario.ts` calculate the separate modelled summaries and profiles.
-7. React renders observed context, assumptions, modelled outputs, and any
+8. React renders observed context, assumptions, modelled outputs, and any
    incomplete/error state. No order or account endpoint is available in this
    flow.
 
@@ -179,10 +200,12 @@ broker-observed data, forecasts, or scenario output.
 
 ## External integration and configuration
 
-The only external service dependency is the tastytrade Python SDK declared in
-`backend/pyproject.toml`. It is reached only by the backend adapter in explicit
-live mode. Credentials are named by `TASTY_CLIENT_SECRET` and
-`TASTY_REFRESH_TOKEN`; `TASTYTRADE_IS_TEST` controls its test setting.
+The only application runtime service dependency is the tastytrade Python SDK
+declared in `backend/pyproject.toml`. It is reached only by the backend adapter
+in explicit live mode. Credentials are named by `TASTY_CLIENT_SECRET` and
+`TASTY_REFRESH_TOKEN`; `TASTYTRADE_IS_TEST` controls its test setting. Initial
+dependency preparation may separately contact configured Python and npm package
+registries.
 
 `MARKET_DATA_MODE` defaults to `fixture` and accepts explicit `tastytrade`.
 Frontend proxy and launcher port/browser settings are `VITE_BACKEND_PORT`,
@@ -209,9 +232,9 @@ current live-adapter claims.
 - Broker credentials and SDK objects must remain backend-only.
 - Observed data and modelled output must stay visibly separate, including saved
   provenance and assumptions.
-- The active frontend engine and standalone backend domain/payoff engine can
-  drift because both calculate financial results. This is the main duplicate
-  responsibility to review before expanding the product.
+- The three calculation paths in the table above can drift because financial
+  conventions and formula helpers are not centralised. This is the main
+  duplicate responsibility to review before expanding the product.
 - `App.tsx` and `market_data.py` each combine several responsibilities. Refactor
   only with focused tests and preserved response/state contracts.
 - Profile values are sampled across a finite visible range. The UI must not

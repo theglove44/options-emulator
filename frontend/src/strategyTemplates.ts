@@ -17,6 +17,15 @@ export type StrategyTemplate = {
   legs: readonly StrategyTemplateLeg[];
 };
 
+export type StrategyResolutionOptions = {
+  /** Absolute delta target for a short leg, or the anchor when a template has no short leg. */
+  targetDelta?: number;
+  /** Numeric distance between adjacent strike roles, in underlying-price points. */
+  strikeWidth?: number;
+  /** Observed contract deltas keyed by contract symbol. */
+  deltaBySymbol?: ReadonlyMap<string, number>;
+};
+
 // Keep the registry explicit: each supported template names its canonical legs
 // and only the UI resolves those legs to contracts from the loaded chain.
 export const STRATEGY_TEMPLATES = {
@@ -153,20 +162,22 @@ export function resolveStrategyTemplateContractsForChain(
   expirations: readonly ChainExpiration[],
   template: StrategyTemplate,
   anchorStrike: number,
-  nearExpiryDate?: string
+  nearExpiryDate?: string,
+  options?: StrategyResolutionOptions
 ): OptionContract[] | null {
   const nearExpiry = expirations.find((item) => item.expiration_date === nearExpiryDate) ?? expirations[0];
   if (!nearExpiry) return null;
   const farExpiry = expirations.find((item) => item.expiration_date > nearExpiry.expiration_date);
   const selectedExpiries = template.legs.map((spec) => spec.expiryRole === "far" ? farExpiry : nearExpiry);
   if (selectedExpiries.some((expiry): expiry is undefined => expiry === undefined)) return null;
-  return resolveStrategyTemplateContractsForExpiries(selectedExpiries as ChainExpiration[], template, anchorStrike);
+  return resolveStrategyTemplateContractsForExpiries(selectedExpiries as ChainExpiration[], template, anchorStrike, options);
 }
 
 function resolveStrategyTemplateContractsForExpiries(
   expiries: readonly ChainExpiration[],
   template: StrategyTemplate,
-  anchorStrike: number
+  anchorStrike: number,
+  options?: StrategyResolutionOptions
 ): OptionContract[] | null {
   const matchingByLeg = template.legs.map((spec, index) => expiries[index].contracts
     .filter((contract) => contract.active && contract.option_type === spec.type)
@@ -178,6 +189,10 @@ function resolveStrategyTemplateContractsForExpiries(
     strikesByRole.set(spec.strikeRole, existing ? existing.filter((strike) => strikes.includes(strike)) : strikes);
   });
   if ([...strikesByRole.values()].some((strikes) => strikes.length === 0)) return null;
+
+  if (options?.targetDelta != null || options?.strikeWidth != null) {
+    return resolveWithPreferences(matchingByLeg, strikesByRole, template, anchorStrike, options);
+  }
 
   const contracts = template.legs.map((spec, index) => {
     const strikes = strikesByRole.get(spec.strikeRole);
@@ -206,6 +221,78 @@ function resolveStrategyTemplateContractsForExpiries(
       const rightOffset = STRIKE_ROLE_OFFSETS[rightSpec.strikeRole];
       if (leftOffset < rightOffset && resolved[left].strike >= resolved[right].strike) return null;
       if (leftOffset > rightOffset && resolved[left].strike <= resolved[right].strike) return null;
+    }
+  }
+  return resolved;
+}
+
+function resolveWithPreferences(
+  matchingByLeg: OptionContract[][],
+  strikesByRole: Map<StrikeRole, number[]>,
+  template: StrategyTemplate,
+  anchorStrike: number,
+  options: StrategyResolutionOptions
+): OptionContract[] | null {
+  const targetDelta = options.targetDelta ?? 0.3;
+  const width = options.strikeWidth ?? 0;
+  const deltaBySymbol = options.deltaBySymbol;
+  const shortIndexes = template.legs
+    .map((spec, index) => spec.side === "sell" ? index : -1)
+    .filter((index) => index >= 0);
+  const targetIndexes = shortIndexes.length ? shortIndexes : template.legs.map((_, index) => index);
+  const roleStrikes = new Map<StrikeRole, number>();
+
+  for (const index of targetIndexes) {
+    const spec = template.legs[index];
+    const allowedStrikes = new Set(strikesByRole.get(spec.strikeRole) ?? []);
+    const candidates = matchingByLeg[index].filter((contract) => allowedStrikes.has(contract.strike));
+    const selected = candidates
+      .slice()
+      .sort((left, right) => {
+        const leftDelta = deltaBySymbol?.get(left.symbol);
+        const rightDelta = deltaBySymbol?.get(right.symbol);
+        const leftDeltaDistance = leftDelta == null ? Number.POSITIVE_INFINITY : Math.abs(Math.abs(leftDelta) - targetDelta);
+        const rightDeltaDistance = rightDelta == null ? Number.POSITIVE_INFINITY : Math.abs(Math.abs(rightDelta) - targetDelta);
+        return leftDeltaDistance - rightDeltaDistance
+          || Math.abs(left.strike - anchorStrike) - Math.abs(right.strike - anchorStrike);
+      })[0];
+    if (!selected) return null;
+    roleStrikes.set(spec.strikeRole, selected.strike);
+  }
+
+  const targetRole = shortIndexes.length ? template.legs[shortIndexes[0]].strikeRole : null;
+
+  const contracts = template.legs.map((spec, index) => {
+    const explicitStrike = roleStrikes.get(spec.strikeRole);
+    let desiredStrike = explicitStrike;
+    if (desiredStrike == null) {
+      const nearestRole = [...roleStrikes.entries()]
+        .sort((left, right) => Math.abs(STRIKE_ROLE_OFFSETS[spec.strikeRole] - STRIKE_ROLE_OFFSETS[left[0]]) - Math.abs(STRIKE_ROLE_OFFSETS[spec.strikeRole] - STRIKE_ROLE_OFFSETS[right[0]]))[0];
+      if (nearestRole) {
+        desiredStrike = nearestRole[1] + (STRIKE_ROLE_OFFSETS[spec.strikeRole] - STRIKE_ROLE_OFFSETS[nearestRole[0]]) * width;
+      }
+    }
+    if (desiredStrike == null) desiredStrike = anchorStrike;
+
+    const contract = matchingByLeg[index].find((item) => item.strike === desiredStrike);
+    if (!contract) return null;
+    if (targetRole != null && spec.strikeRole === targetRole && roleStrikes.get(spec.strikeRole) !== contract.strike) return null;
+    return contract;
+  });
+  if (contracts.some((contract): contract is null => contract === null)) return null;
+
+  const resolved = contracts as OptionContract[];
+  for (let left = 0; left < resolved.length; left += 1) {
+    for (let right = left + 1; right < resolved.length; right += 1) {
+      const leftSpec = template.legs[left];
+      const rightSpec = template.legs[right];
+      if (leftSpec.strikeRole === rightSpec.strikeRole && resolved[left].strike !== resolved[right].strike) return null;
+      if (leftSpec.strikeRole !== rightSpec.strikeRole) {
+        const leftOffset = STRIKE_ROLE_OFFSETS[leftSpec.strikeRole];
+        const rightOffset = STRIKE_ROLE_OFFSETS[rightSpec.strikeRole];
+        if (leftOffset < rightOffset && resolved[left].strike >= resolved[right].strike) return null;
+        if (leftOffset > rightOffset && resolved[left].strike <= resolved[right].strike) return null;
+      }
     }
   }
   return resolved;

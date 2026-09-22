@@ -26,6 +26,11 @@ are busy, and opens the resulting browser URL. Set
 `OPTION_EMULATOR_OPEN_BROWSER=0` when checking the servers without opening a
 browser.
 
+On a machine where `backend/.venv` or `frontend/node_modules` is missing, the
+first launch runs `pip install` and `npm ci`. That preparation can contact the
+configured Python and npm package registries. Once those dependencies exist,
+fixture mode runs locally and does not contact tastytrade.
+
 The normal default ports are backend `8765` and frontend `5173`. Vite proxies
 frontend `/api` calls to the backend port through `VITE_BACKEND_PORT`.
 
@@ -43,7 +48,8 @@ frontend `/api` calls to the backend port through `VITE_BACKEND_PORT`.
   the configured market-data adapter.
 - `backend/src/options_emulator/market_data.py` defines the normalised response
   shapes and the two adapter implementations: deterministic fixture data and
-  read-only tastytrade data.
+  read-only tastytrade data. Its fixture adapter generates coherent educational
+  option prices and Greeks with its own Black–Scholes-style calculation.
 - `frontend/src/position.ts` and `frontend/src/scenario.ts` contain the active
   browser-side P&L, pre-expiry pricing, commission, and Greeks calculations.
 - `frontend/src/strategyTemplates.ts` resolves named strategy legs against the
@@ -63,11 +69,15 @@ quote state on a failed load.
 
 ### 2. Build or edit a strategy
 
-The template selector resolves supported calls, puts, spreads, straddles,
-strangles, calendars, diagonals, and iron condors from actual chain contracts.
-Users can edit expiry, strike, call/put type, buy/sell side, quantity, and add or
-remove legs. An edit that no longer matches a recognised template becomes a
-custom position.
+The Choose strategy dialog groups supported calls, puts, spreads, straddles,
+strangles, calendars, diagonals, and iron condors. For each prebuilt strategy,
+it can use observed contract deltas to select a target short strike and numeric
+strike width before resolving the trade from actual chain contracts. Users can
+also choose the strategy expiry, with the nearest expiry selected by default;
+calendar and diagonal templates use the next available expiry for their far
+leg. Users can then edit expiry, strike, call/put type, buy/sell side, quantity,
+and add or remove legs. An edit that no longer matches a recognised template
+becomes a custom position.
 
 ### 3. Refresh observed prices
 
@@ -78,7 +88,10 @@ scenario assumptions. Contract multipliers come from the chain.
 
 ### 4. Inspect modelled results
 
-The browser calculates entry cash flow, commissions, expiration intrinsic-value
+The payoff graph is shown immediately below the market context so the trade
+shape is visible before the detailed controls. Secondary quote, scenario, and
+Greek panels are collapsed by default but retain the full provenance and
+observed-versus-modelled labels. The browser calculates entry cash flow, commissions, expiration intrinsic-value
 P&L, breakeven, a finite graph/table display range, observed aggregate Greeks,
 pre-expiry modelled P&L, and modelled future Greeks. Pre-expiry output uses the
 scenario date, per-leg volatility, and the fixed educational 5% rate; it is not
@@ -140,13 +153,16 @@ authenticated adapter check.
 
 ## Areas that are easy to break
 
-- The backend domain/payoff path and active frontend modelling path contain
-  separate calculation implementations. The frontend does not currently call
-  `/api/payoff`; their cash-flow, multiplier, call/put, and extrema conventions
-  must stay aligned.
+- Financial maths exists in three places for three different jobs: fixture quote
+  and Greek generation in `backend/src/options_emulator/market_data.py`, the
+  standalone backend payoff model in `backend/src/options_emulator/domain.py`,
+  and the active browser model in `frontend/src/position.ts` plus
+  `frontend/src/scenario.ts`. The frontend does not call `/api/payoff`. Changes
+  to shared conventions such as call/put branches, multipliers, rates, or the
+  normal-CDF approximation can therefore drift between paths.
 - `frontend/src/App.tsx` combines data loading, reconciliation, calculations,
-  persistence actions, and rendering. A state change can affect several visible
-  outputs at once.
+  persistence actions, single-leg breakeven logic, sampled extrema, and
+  rendering. A state change can affect several visible outputs at once.
 - The graph samples a finite price window. It must not be treated as proof of a
   theoretical maximum loss or profit without analytical handling of unbounded
   exposure.

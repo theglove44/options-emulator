@@ -96,17 +96,23 @@ builder forms and canonical multi-leg forms—Call Credit Spread, Put Credit
 Spread, Vertical Spread, Long Straddle, Long Strangle, Short Strangle, Iron
 Condor, Calendar Spread, and Diagonal Spread—
 are represented by an explicit strategy template registry, with Long Call as the
-default. Selecting a template resolves its named legs against the loaded chain;
-the existing multi-leg seam still allows those legs to be selected, edited, and
-removed. Aggregate cash-flow and expiration-profile summaries remain separate
-from observed market data. Aggregate expiration output is withheld while a leg
-is unpriced or expiries are not aligned; multi-expiry and pre-expiry modelling
-remain later work. The payoff panel supports graph and table display modes, a
-zoomable signed profit/loss graph with breakeven markers, and a hover readout
-for underlying price and modelled P&L. Each active leg also has an explicit
-contract-backed strike picker rather than a continuous slider. Scenario date
-and active-leg implied-volatility controls record explicit assumptions, but do
-not change the current expiration-only model.
+default. The Choose strategy dialog groups those templates and can build a
+selected trade from a chosen expiry, target short-strike delta, and numeric
+strike width, using observed contract deltas when available. The nearest expiry
+is selected by default, and calendar/diagonal far legs use the next available
+expiry. The existing multi-leg seam still allows legs to be selected, edited,
+and removed. Aggregate cash-flow and
+expiration-profile summaries remain separate from observed market data.
+Aggregate expiration output is withheld while a leg is unpriced or expiries
+are not aligned; multi-expiry and pre-expiry modelling remain later work. The
+payoff graph is placed immediately below the market context, with secondary
+quote, scenario, and Greek detail collapsed by default. The panel still
+supports graph and table display modes, a zoomable signed profit/loss graph
+with breakeven markers, and a hover readout for underlying price and modelled
+P&L. Each active leg also has an explicit contract-backed strike picker rather
+than a continuous slider. Scenario date and active-leg implied-volatility
+controls record explicit assumptions, but do not change the current
+expiration-only model.
 
 Strategies can be saved locally from the builder. The Saved trades view stores
 versioned JSON in this browser's `localStorage`, including the legs, selected

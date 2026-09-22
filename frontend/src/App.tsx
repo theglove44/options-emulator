@@ -3,8 +3,8 @@ import { fetchChain, fetchHealth, fetchQuotes, fetchSymbolSearch } from "./api";
 import type { ChainExpiration, OptionChainResponse, OptionContract, PricingMode, QuoteResponse, QuoteSnapshot, SymbolResult } from "./api";
 import { initialLeg } from "./mockData";
 import { buildPositionProfile, buildPreExpiryProfile, calculatePreExpiryPnl, hasUnboundedProfit, summarizeModelledGreeks, summarizeObservedGreeks, summarizePosition } from "./position";
-import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, STRATEGY_TEMPLATES, templateForLeg } from "./strategyTemplates";
-import type { StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
+import { DEFAULT_STRATEGY_TEMPLATE_ID, getStrategyTemplate, resolveStrategyTemplateContractsForChain, templateForLeg } from "./strategyTemplates";
+import type { StrategyResolutionOptions, StrategyTemplate, StrategyTemplateId } from "./strategyTemplates";
 import { clampScenarioDate, formatVolatilityPercent } from "./scenario";
 import { deleteSavedStrategy, listSavedStrategies, saveStrategy } from "./savedStrategies";
 import type { SavedStrategy } from "./savedStrategies";
@@ -12,6 +12,7 @@ import type { Leg } from "./types";
 import { getFixtureMarketOverlay } from "./marketOverlay";
 import { commitNumericDraft, formatDraft } from "./numericDraft";
 import { applyObservedPrices } from "./quoteState";
+import { filterStrikeContractsToDeltaWindow, selectPreviewStrikeContracts } from "./strikeWindow";
 
 const money = new Intl.NumberFormat("en-GB", {
   style: "currency",
@@ -25,6 +26,28 @@ const price = new Intl.NumberFormat("en-GB", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 });
+
+const STRATEGY_GROUPS: ReadonlyArray<{ label: string; ids: StrategyTemplateId[] }> = [
+  { label: "Directional", ids: ["long-call", "short-call", "long-put", "short-put"] },
+  { label: "Spreads", ids: ["call-credit-spread", "put-credit-spread", "vertical-spread", "calendar-spread", "diagonal-spread"] },
+  { label: "Volatility", ids: ["straddle", "strangle", "short-strangle", "iron-condor"] }
+];
+
+const STRATEGY_DESCRIPTIONS: Record<StrategyTemplateId, string> = {
+  "long-call": "Buy a call for upside exposure",
+  "short-call": "Sell a call for income",
+  "long-put": "Buy a put for downside exposure",
+  "short-put": "Sell a put for income",
+  "call-credit-spread": "Sell a call and cap risk above",
+  "put-credit-spread": "Sell a put and cap risk below",
+  "vertical-spread": "Buy one call and sell a higher call",
+  straddle: "Buy a call and put at one strike",
+  strangle: "Buy calls and puts at two strikes",
+  "short-strangle": "Sell calls and puts for range income",
+  "calendar-spread": "Sell near-term, buy longer-term call",
+  "diagonal-spread": "Mix expiry and strike exposure",
+  "iron-condor": "Sell a range with defined wings"
+};
 
 function App() {
   const [symbol, setSymbol] = useState("ETHA");
@@ -52,6 +75,13 @@ function App() {
   const [scenarioDate, setScenarioDate] = useState("");
   const [impliedVolatilityOverrides, setImpliedVolatilityOverrides] = useState<Record<string, number>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState<StrategyTemplateId | "custom">(DEFAULT_STRATEGY_TEMPLATE_ID);
+  const [strategyPickerOpen, setStrategyPickerOpen] = useState(false);
+  const [strategyPickerTemplateId, setStrategyPickerTemplateId] = useState<StrategyTemplateId>(DEFAULT_STRATEGY_TEMPLATE_ID);
+  const [strategyPickerExpiryDate, setStrategyPickerExpiryDate] = useState("");
+  const [strategyPickerDelta, setStrategyPickerDelta] = useState("0.30");
+  const [strategyPickerWidth, setStrategyPickerWidth] = useState("5");
+  const [strategyPickerQuotes, setStrategyPickerQuotes] = useState<QuoteResponse | null>(null);
+  const [strategyPickerLoading, setStrategyPickerLoading] = useState(false);
   const [showSavedStrategies, setShowSavedStrategies] = useState(false);
   const [savedStrategies, setSavedStrategies] = useState<SavedStrategy[]>(() => listSavedStrategies());
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -174,6 +204,10 @@ function App() {
   const selectedExpiry = chain?.expirations.find((item) => item.expiration_date === activeLeg.expiry);
   const strikeContracts = selectedExpiry?.contracts.filter((contract) => contract.option_type === activeLeg.type && contract.active) ?? [];
   const strikeContractKey = strikeContracts.map((contract) => contract.symbol).join("|");
+  const strikePreviewContracts = useMemo(
+    () => selectPreviewStrikeContracts(strikeContracts, spot ?? activeLeg.strike),
+    [activeLeg.strike, spot, strikeContractKey]
+  );
   const scenarioMinimumDate = contextDate(chain);
   const scenarioMaximumDate = selectedExpiry?.expiration_date ?? scenarioMinimumDate;
   const activeContract = findContract(chain, activeLeg);
@@ -198,6 +232,68 @@ function App() {
     [selectedContracts, strikeContractKey]
   );
   const quoteContractKey = `${selectedContractKey}|${strikeContractKey}`;
+  const visibleStrikeContracts = useMemo(
+    () => optionResponse
+      ? filterStrikeContractsToDeltaWindow(strikeContracts, optionResponse, new Set(selectedContracts.map((contract) => contract.symbol)))
+      : strikePreviewContracts,
+    [optionResponse, selectedContracts, strikeContractKey, strikePreviewContracts]
+  );
+  const strategyPickerExpiry = chain?.expirations.find((item) => item.expiration_date === legs[0]?.expiry) ?? chain?.expirations[0];
+  const selectedStrategyPickerExpiry = chain?.expirations.find((item) => item.expiration_date === strategyPickerExpiryDate) ?? strategyPickerExpiry;
+  const strategyPickerContracts = useMemo(
+    () => selectedStrategyPickerExpiry?.contracts.filter((contract) => contract.active) ?? [],
+    [selectedStrategyPickerExpiry]
+  );
+  const strategyPickerContractKey = strategyPickerContracts.map((contract) => contract.symbol).join("|");
+  const strategyPickerWidthOptions = useMemo(() => {
+    const strikes = [...new Set(strategyPickerContracts.map((contract) => contract.strike))].sort((left, right) => left - right);
+    const preferred = [1, 2, 5, 10, 25, 50];
+    const available = preferred.filter((width) => strikes.some((strike) => strikes.includes(Number((strike + width).toFixed(2)))));
+    if (available.length) return available;
+    const smallest = strikes.slice(1).reduce((current, strike, index) => Math.min(current, strike - strikes[index]), Number.POSITIVE_INFINITY);
+    return Number.isFinite(smallest) ? [Number(smallest.toFixed(2))] : [1];
+  }, [strategyPickerContractKey]);
+  const strategyPickerTemplate = getStrategyTemplate(strategyPickerTemplateId);
+  const strategyPickerHasShortLeg = strategyPickerTemplate.legs.some((leg) => leg.side === "sell");
+  const strategyPickerRoles = new Set(strategyPickerTemplate.legs.map((leg) => leg.strikeRole));
+  const strategyPickerHasWidth = strategyPickerRoles.size > 1 && (strategyPickerRoles.has("anchor") || strategyPickerRoles.has("far-lower") || strategyPickerRoles.has("far-upper"));
+  const strategyPickerDeltaBySymbol = useMemo(
+    () => new Map((strategyPickerQuotes?.items ?? []).flatMap((quote) => quote.greeks?.delta == null ? [] : [[quote.symbol, quote.greeks.delta] as const])),
+    [strategyPickerQuotes]
+  );
+
+  useEffect(() => {
+    if (!chain?.expirations.length) return;
+    if (!chain.expirations.some((item) => item.expiration_date === strategyPickerExpiryDate)) {
+      setStrategyPickerExpiryDate(chain.expirations[0].expiration_date);
+    }
+  }, [chain, strategyPickerExpiryDate]);
+
+  useEffect(() => {
+    if (!strategyPickerOpen || !strategyPickerContracts.length) return;
+    let cancelled = false;
+    setStrategyPickerQuotes(null);
+    setStrategyPickerLoading(true);
+    fetchQuotes(strategyPickerContracts.map((contract) => contract.symbol), pricingMode)
+      .then((quotes) => {
+        if (!cancelled) setStrategyPickerQuotes(quotes);
+      })
+      .catch(() => {
+        if (!cancelled) setStrategyPickerQuotes(null);
+      })
+      .finally(() => {
+        if (!cancelled) setStrategyPickerLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pricingMode, strategyPickerContractKey, strategyPickerContracts, strategyPickerOpen]);
+
+  useEffect(() => {
+    if (!strategyPickerWidthOptions.includes(Number(strategyPickerWidth))) {
+      setStrategyPickerWidth(String(strategyPickerWidthOptions[0]));
+    }
+  }, [strategyPickerWidth, strategyPickerWidthOptions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -325,22 +421,38 @@ function App() {
     setSymbol(nextSymbol);
   }
 
-  function applyStrategyTemplate(templateId: StrategyTemplateId) {
-    if (!chain) return;
+  function openStrategyPicker() {
+    setStrategyPickerTemplateId(currentTemplateId === "custom" ? DEFAULT_STRATEGY_TEMPLATE_ID : currentTemplateId);
+    setStrategyPickerExpiryDate(chain?.expirations[0]?.expiration_date || "");
+    setStrategyPickerOpen(true);
+  }
+
+  function applyStrategyTemplate(templateId: StrategyTemplateId, options?: StrategyResolutionOptions, nearExpiryDate?: string): boolean {
+    if (!chain) return false;
     const template = getStrategyTemplate(templateId);
-    const nearExpiry = chain.expirations.find((item) => item.expiration_date === legs[0]?.expiry) ?? chain.expirations[0];
-    if (!nearExpiry) return;
+    const nearExpiry = chain.expirations.find((item) => item.expiration_date === nearExpiryDate) ?? chain.expirations.find((item) => item.expiration_date === legs[0]?.expiry) ?? chain.expirations[0];
+    if (!nearExpiry) return false;
     const anchorStrike = spotValue > 0 ? spotValue : activeLeg.strike > 0 ? activeLeg.strike : 14;
-    const contracts = resolveStrategyTemplateContractsForChain(chain.expirations, template, anchorStrike, nearExpiry.expiration_date);
+    const contracts = resolveStrategyTemplateContractsForChain(chain.expirations, template, anchorStrike, nearExpiry.expiration_date, options);
     if (!contracts) {
       setTemplateError(`${template.label} cannot be resolved from the available expirations and strikes.`);
-      return;
+      return false;
     }
     setTemplateError(null);
     const nextLegs = buildTemplateLegs(template, contracts, nearExpiry);
     setLegs(nextLegs);
     setActiveLegId(nextLegs[0]?.id ?? initialLeg.id);
     setSelectedTemplateId(templateId);
+    return true;
+  }
+
+  function buildFromStrategyPicker() {
+    const applied = applyStrategyTemplate(strategyPickerTemplateId, {
+      targetDelta: Number(strategyPickerDelta),
+      strikeWidth: strategyPickerHasWidth ? Number(strategyPickerWidth) : undefined,
+      deltaBySymbol: strategyPickerDeltaBySymbol
+    }, selectedStrategyPickerExpiry?.expiration_date);
+    if (applied) setStrategyPickerOpen(false);
   }
 
   function chooseExpiry(expiry: ChainExpiration) {
@@ -517,19 +629,7 @@ function App() {
             <h1>{strategyName}</h1>
           </div>
           <div className="toolbar-actions">
-            <label className="template-field">
-              <span>Template</span>
-              <select value={currentTemplateId} onChange={(event) => applyStrategyTemplate(event.target.value as StrategyTemplateId)} disabled={!chain} aria-label="Strategy template">
-                {currentTemplateId === "custom" && <option value="custom">Custom position</option>}
-                {Object.values(STRATEGY_TEMPLATES).map((template) => {
-                  const nearExpiry = chain?.expirations.find((item) => item.expiration_date === legs[0]?.expiry) ?? chain?.expirations[0];
-                  const available = chain && nearExpiry
-                    ? resolveStrategyTemplateContractsForChain(chain.expirations, template, spotValue > 0 ? spotValue : activeLeg.strike || 14, nearExpiry.expiration_date)
-                    : null;
-                  return <option key={template.id} value={template.id} disabled={!available}>{template.label}</option>;
-                })}
-              </select>
-            </label>
+            <button className="button strategy-launcher" onClick={openStrategyPicker} disabled={!chain} aria-haspopup="dialog">Choose strategy <span>⌄</span></button>
             <button className="button primary" onClick={() => updateActiveLeg({ side: activeLeg.side === "buy" ? "sell" : "buy" })}>Flip side ↔</button>
             <button className="button" onClick={addLeg}>Positions ({summary.legCount}) +</button>
             <button className="button" onClick={openSaveDialog} disabled={loading || !chain || !allLegsPriced}>Save trade ▣</button>
@@ -596,6 +696,111 @@ function App() {
         {error && <div className="data-error" role="alert">Market data unavailable: {error}</div>}
         {templateError && <div className="data-error" role="alert">Strategy template unavailable: {templateError}</div>}
 
+        {strategyPickerOpen && (
+          <div className="strategy-modal-backdrop">
+            <section className="strategy-modal" role="dialog" aria-modal="true" aria-labelledby="strategy-picker-title">
+              <div className="strategy-modal-heading">
+                <div>
+                  <span className="section-label">Build a position</span>
+                  <h2 id="strategy-picker-title">Choose a strategy</h2>
+                  <p>Start with the shape of the trade. Set the short-strike delta and width before the contracts are built.</p>
+                </div>
+                <button className="button subtle" onClick={() => setStrategyPickerOpen(false)} aria-label="Close strategy picker">Close</button>
+              </div>
+              <div className="strategy-groups">
+                {STRATEGY_GROUPS.map((group) => (
+                  <div className="strategy-group" key={group.label}>
+                    <span className="section-label">{group.label}</span>
+                    <div className="strategy-card-grid">
+                      {group.ids.map((templateId) => {
+                        const template = getStrategyTemplate(templateId);
+                        const nearExpiry = selectedStrategyPickerExpiry;
+                        const available = chain && nearExpiry
+                          ? resolveStrategyTemplateContractsForChain(chain.expirations, template, spotValue > 0 ? spotValue : activeLeg.strike || 14, nearExpiry.expiration_date)
+                          : null;
+                        return (
+                          <button
+                            type="button"
+                            key={templateId}
+                            className={`strategy-card ${strategyPickerTemplateId === templateId ? "selected" : ""}`}
+                            onClick={() => setStrategyPickerTemplateId(templateId)}
+                            disabled={!available}
+                            aria-pressed={strategyPickerTemplateId === templateId}
+                          >
+                            <strong>{template.label}</strong>
+                            <span>{STRATEGY_DESCRIPTIONS[templateId]}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="strategy-preferences">
+                <div className="strategy-preferences-heading">
+                  <div>
+                    <span className="section-label">Trade preferences</span>
+                    <strong>{strategyPickerTemplate.label}</strong>
+                  </div>
+                  <span className="picker-quote-status">{strategyPickerLoading ? "Loading deltas…" : strategyPickerQuotes ? "Observed deltas loaded" : "Using nearest available strike"}</span>
+                </div>
+                <div className="picker-fields">
+                  <label className="picker-field">
+                    <span>Expiration</span>
+                    <select
+                      value={selectedStrategyPickerExpiry?.expiration_date ?? ""}
+                      onChange={(event) => setStrategyPickerExpiryDate(event.target.value)}
+                      aria-label="Strategy expiration"
+                    >
+                      {(chain?.expirations ?? []).map((expiry) => (
+                        <option key={expiry.expiration_date} value={expiry.expiration_date}>
+                          {formatExpiry(expiry.expiration_date)} · {expiry.days_to_expiration}d
+                        </option>
+                      ))}
+                    </select>
+                    <small>{strategyPickerTemplate.legs.some((leg) => "expiryRole" in leg && leg.expiryRole === "far") ? "The far leg uses the next available expiration." : "Nearest expiration is selected by default."}</small>
+                  </label>
+                  <label className="picker-field">
+                    <span>{strategyPickerHasShortLeg ? "Short strike delta" : "Target delta"}</span>
+                    <select value={strategyPickerDelta} onChange={(event) => setStrategyPickerDelta(event.target.value)} aria-label={strategyPickerHasShortLeg ? "Short strike delta" : "Target delta"}>
+                      {[0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5].map((delta) => <option key={delta} value={delta.toFixed(2)}>{Math.round(delta * 100)}Δ</option>)}
+                    </select>
+                    <small>Uses absolute delta, so puts and calls stay comparable.</small>
+                  </label>
+                  <label className="picker-field">
+                    <span>Strike width</span>
+                    <select value={strategyPickerWidth} onChange={(event) => setStrategyPickerWidth(event.target.value)} disabled={!strategyPickerHasWidth} aria-label="Strike width">
+                      {strategyPickerWidthOptions.map((width) => <option key={width} value={width}>{width} points</option>)}
+                    </select>
+                    <small>{strategyPickerHasWidth ? "Distance between adjacent strikes." : strategyPickerRoles.size > 1 ? "This strategy uses delta-defined outer strikes." : "This strategy uses one strike."}</small>
+                  </label>
+                </div>
+                <div className="strategy-modal-actions">
+                  <button className="button subtle" onClick={() => setStrategyPickerOpen(false)}>Cancel</button>
+                  <button className="button primary" onClick={buildFromStrategyPicker} disabled={strategyPickerLoading && !strategyPickerQuotes}>Build {strategyPickerTemplate.label}</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        <section className="chart-panel chart-panel-primary">
+          <div className="chart-header">
+            <div><span className="section-label">Projected outcome</span><strong>At expiration</strong></div>
+            <div className="chart-controls">
+              <span>View ±{range}%</span>
+              <button className="zoom-button" onClick={() => setRange((value) => Math.min(60, value + 5))} aria-label="Zoom out">−</button>
+              <input type="range" min="8" max="60" value={range} onChange={(event) => setRange(Number(event.target.value))} aria-label="Price range" />
+              <button className="zoom-button" onClick={() => setRange((value) => Math.max(8, value - 5))} aria-label="Zoom in">+</button>
+            </div>
+          </div>
+          {profile.length ? (view === "graph" ? <PayoffGraph profile={profile} spot={spotValue} breakeven={breakeven ?? undefined} /> : <PayoffTable profile={profile} />) : <div className="empty-state">{!allLegsPriced ? "Loading observed quote data for the local expiration model…" : hasMixedExpiries ? "Align leg expiries before modelling the aggregate expiration outcome…" : "Select a valid contract for every leg to model the aggregate expiration outcome…"}</div>}
+          <div className="display-bar">
+            <div className="segmented"><button className={view === "table" ? "selected" : ""} onClick={() => setView("table")}>▦ Table</button><button className={view === "graph" ? "selected" : ""} onClick={() => setView("graph")}>⌁ Graph</button></div>
+            <div className="segmented units"><button className="selected">Profit / Loss $</button><button>Profit / Loss %</button><button>Contract value</button></div>
+          </div>
+        </section>
+
         <section className="expiry-section">
           <div className="section-label">Expiration <strong>{selectedExpiry?.days_to_expiration ?? "—"}d</strong><span className="expiry-legend">Weekly / Monthly</span></div>
           <div className="expiry-track">
@@ -608,9 +813,9 @@ function App() {
         </section>
 
         <section className="strike-section">
-          <div className="strike-heading"><div className="section-label">Strike <strong>{activeLeg.strike || "—"}{activeLeg.type === "call" ? "C" : "P"}</strong></div><span>Select a {activeLeg.type === "call" ? "call" : "put"} strike for this leg</span></div>
+          <div className="strike-heading"><div className="section-label">Strike <strong>{activeLeg.strike || "—"}{activeLeg.type === "call" ? "C" : "P"}</strong></div><span>Select a {activeLeg.type === "call" ? "call" : "put"} strike · 10Δ–90Δ range</span></div>
           <div className="strike-grid" role="group" aria-label={`${activeLeg.type === "call" ? "Call" : "Put"} strikes`}>
-            {strikeContracts.map((contract) => {
+            {visibleStrikeContracts.map((contract) => {
               const delta = optionResponse ? findQuote(optionResponse, contract.symbol)?.greeks?.delta ?? null : null;
               return (
                 <button
@@ -627,11 +832,14 @@ function App() {
                 </button>
               );
             })}
-            {!strikeContracts.length && <span className="strike-empty">No active strikes available for this leg.</span>}
+            {!visibleStrikeContracts.length && <span className="strike-empty">No active strikes available for this leg.</span>}
           </div>
-          <div className="strike-context"><span>{strikeContracts.length ? `${strikeContracts.length} available strikes` : "—"}</span><span className="spot-marker">{symbol} {spot != null ? spot.toFixed(2) : "—"}</span></div>
+          <div className="strike-context"><span>{visibleStrikeContracts.length ? `${visibleStrikeContracts.length} visible strikes` : "—"}</span><span className="spot-marker">{symbol} {spot != null ? spot.toFixed(2) : "—"}</span></div>
         </section>
 
+        <details className="secondary-details">
+          <summary><span><strong>Advanced inputs</strong><small>Quote detail, custom price, commission, date and IV</small></span><span>Optional</span></summary>
+          <div className="details-content">
         <section className="greeks-panel contract-greeks-panel" aria-label="Selected contract observed quote and Greeks">
           <div className="greeks-heading">
             <div><span className="section-label">Selected contract</span><strong>{activeContract ? `${activeContract.strike}${activeContract.option_type === "call" ? "C" : "P"} · ${activeContract.expiration_date}` : "No contract"}</strong></div>
@@ -748,6 +956,8 @@ function App() {
           </div>
           <p className="scenario-note">Observed quotes and Greeks remain unchanged. Custom prices and commissions drive the separate modelled P&amp;L outputs below.</p>
         </section>
+          </div>
+        </details>
 
         <section className="position-summary" aria-label="Position summary details">
           <div><span className="section-label">Position summary</span><strong>{summary.legCount} leg{summary.legCount === 1 ? "" : "s"}</strong></div>
@@ -763,6 +973,9 @@ function App() {
           <Metric label="Breakeven" value={breakeven != null && activeLeg.strike ? `${activeLeg.type === "call" ? "Above" : "Below"} ${breakeven.toFixed(2)}` : "Multi-leg"} detail={breakeven != null && activeLeg.strike ? `${Number(breakevenChange) >= 0 ? "+" : ""}${breakevenChange}%` : "See aggregate graph"} tone="neutral" />
         </section>
 
+        <details className="secondary-details analysis-details">
+          <summary><span><strong>More analysis</strong><small>Observed Greeks, modelled Greeks, events and pre-expiry model</small></span><span>Optional</span></summary>
+          <div className="details-content">
         <section className="greeks-panel" aria-label="Observed aggregate Greeks">
           <div className="greeks-heading">
             <div><span className="section-label">Observed aggregate Greeks</span><strong>Position sensitivity</strong></div>
@@ -834,23 +1047,8 @@ function App() {
           </div>
           <p className="greeks-note">Black–Scholes-style option values use the recorded or custom entry price, scenario date, each leg's observed or overridden IV, and the fixed educational rate assumption. This is modelled output, not an observed quote or future-date Greek.</p>
         </section>
-
-        <section className="chart-panel">
-          <div className="chart-header">
-            <div><span className="section-label">Projected outcome</span><strong>At expiration</strong></div>
-            <div className="chart-controls">
-              <span>View ±{range}%</span>
-              <button className="zoom-button" onClick={() => setRange((value) => Math.min(60, value + 5))} aria-label="Zoom out">−</button>
-              <input type="range" min="8" max="60" value={range} onChange={(event) => setRange(Number(event.target.value))} aria-label="Price range" />
-              <button className="zoom-button" onClick={() => setRange((value) => Math.max(8, value - 5))} aria-label="Zoom in">+</button>
-            </div>
           </div>
-          {profile.length ? (view === "graph" ? <PayoffGraph profile={profile} spot={spotValue} breakeven={breakeven ?? undefined} /> : <PayoffTable profile={profile} />) : <div className="empty-state">{!allLegsPriced ? "Loading observed quote data for the local expiration model…" : hasMixedExpiries ? "Align leg expiries before modelling the aggregate expiration outcome…" : "Select a valid contract for every leg to model the aggregate expiration outcome…"}</div>}
-          <div className="display-bar">
-            <div className="segmented"><button className={view === "table" ? "selected" : ""} onClick={() => setView("table")}>▦ Table</button><button className={view === "graph" ? "selected" : ""} onClick={() => setView("graph")}>⌁ Graph</button></div>
-            <div className="segmented units"><button className="selected">Profit / Loss $</button><button>Profit / Loss %</button><button>Contract value</button></div>
-          </div>
-        </section>
+        </details>
 
         <section className="leg-list" aria-label="Position legs">
           {legs.map((positionLeg) => {

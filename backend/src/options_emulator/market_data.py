@@ -305,6 +305,7 @@ FIXTURE_EXPIRATIONS = (
 )
 FIXTURE_STRIKES = (12.0, 13.0, 14.0, 15.0, 16.0, 17.0)
 FIXTURE_SPOT = 14.18
+TASTYTRADE_BATCH_SIZE = 50
 
 
 @dataclass(frozen=True)
@@ -673,14 +674,13 @@ class TastytradeMarketDataAdapter:
         requested = list(dict.fromkeys(symbol.strip() for symbol in symbols if symbol.strip()))
         option_symbols = [symbol for symbol in requested if _parse_option_symbol(symbol)]
         equity_symbols = [symbol for symbol in requested if symbol not in option_symbols]
-        kwargs: dict[str, list[str]] = {}
-        if equity_symbols:
-            kwargs["equities"] = equity_symbols
-        if option_symbols:
-            kwargs["options"] = option_symbols
-
         async with self._session() as session:
-            market_data = await get_market_data_by_type(session, **kwargs)
+            market_data: list[Any] = []
+            if equity_symbols:
+                market_data.extend(await get_market_data_by_type(session, equities=equity_symbols))
+            for start in range(0, len(option_symbols), TASTYTRADE_BATCH_SIZE):
+                option_batch = option_symbols[start : start + TASTYTRADE_BATCH_SIZE]
+                market_data.extend(await get_market_data_by_type(session, options=option_batch))
             greek_events = await self._fetch_greeks(
                 session, option_symbols, DXLinkStreamer, Greeks, Option
             )
@@ -754,39 +754,43 @@ class TastytradeMarketDataAdapter:
         greeks_class: Any,
         option_class: Any,
     ) -> dict[str, tuple[GreekSnapshot, datetime]]:
-        streamer_symbols = {_option_streamer_symbol(symbol, option_class) for symbol in symbols}
+        streamer_symbols = list(
+            dict.fromkeys(_option_streamer_symbol(symbol, option_class) for symbol in symbols)
+        )
         if not streamer_symbols:
             return {}
         events: dict[str, tuple[GreekSnapshot, datetime]] = {}
-        async with streamer_class(session) as streamer:
-            await streamer.subscribe(greeks_class, list(streamer_symbols))
-            deadline = asyncio.get_running_loop().time() + self.streamer_timeout
-            while len(events) < len(streamer_symbols):
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    break
-                try:
-                    event = await asyncio.wait_for(
-                        streamer.get_event(greeks_class), timeout=remaining
+        for start in range(0, len(streamer_symbols), TASTYTRADE_BATCH_SIZE):
+            streamer_batch = set(streamer_symbols[start : start + TASTYTRADE_BATCH_SIZE])
+            async with streamer_class(session) as streamer:
+                await streamer.subscribe(greeks_class, list(streamer_batch))
+                deadline = asyncio.get_running_loop().time() + self.streamer_timeout
+                while not streamer_batch.issubset(events):
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        break
+                    try:
+                        event = await asyncio.wait_for(
+                            streamer.get_event(greeks_class), timeout=remaining
+                        )
+                    except TimeoutError:
+                        break
+                    event_symbol = str(
+                        getattr(event, "event_symbol", getattr(event, "eventSymbol", ""))
                     )
-                except TimeoutError:
-                    break
-                event_symbol = str(
-                    getattr(event, "event_symbol", getattr(event, "eventSymbol", ""))
-                )
-                if event_symbol not in streamer_symbols:
-                    continue
-                events[event_symbol] = (
-                    GreekSnapshot(
-                        implied_volatility=_as_float(getattr(event, "volatility", None)),
-                        delta=_as_float(getattr(event, "delta", None)),
-                        gamma=_as_float(getattr(event, "gamma", None)),
-                        theta=_as_float(getattr(event, "theta", None)),
-                        rho=_as_float(getattr(event, "rho", None)),
-                        vega=_as_float(getattr(event, "vega", None)),
-                    ),
-                    _event_datetime(getattr(event, "time", None)),
-                )
+                    if event_symbol not in streamer_batch:
+                        continue
+                    events[event_symbol] = (
+                        GreekSnapshot(
+                            implied_volatility=_as_float(getattr(event, "volatility", None)),
+                            delta=_as_float(getattr(event, "delta", None)),
+                            gamma=_as_float(getattr(event, "gamma", None)),
+                            theta=_as_float(getattr(event, "theta", None)),
+                            rho=_as_float(getattr(event, "rho", None)),
+                            vega=_as_float(getattr(event, "vega", None)),
+                        ),
+                        _event_datetime(getattr(event, "time", None)),
+                    )
         return events
 
 
